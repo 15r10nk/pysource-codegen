@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "hypothesis-python-codegen"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+packages = [{include = "hypothesis_python_codegen"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+hypothesis = "^6.65.2"
+pytest = "^7.2.1"
+hypothesmith = "^0.2.3"
+hypofuzz = "^22.12.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
