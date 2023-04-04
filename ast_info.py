@@ -1,17 +1,7 @@
 import ast
 import inspect
 import re
-
 from dataclasses import dataclass, field
-
-import hypothesis.strategies as st
-from hypothesis import given, settings, HealthCheck, target
-
-from pprint import pprint
-
-import hypothesis.internal.conjecture.engine as engine
-
-engine.BUFFER_SIZE = 10000000
 
 
 @dataclass
@@ -40,7 +30,7 @@ def get_info(name):
         type_infos[name] = BuiltinNodeType(name)
 
     else:
-        doc = inspect.getdoc(getattr(ast, name))
+        doc = inspect.getdoc(getattr(ast, name)) or ""
         doc = doc.replace("\n", " ")
 
         if doc:
@@ -85,6 +75,16 @@ import random
 
 
 def propability(parents, child_name):
+    parent_types = [p[0] for p in parents]
+
+    def inside(types, not_types=()):
+        for parent in reversed(parent_types):
+            if parent in types:
+                return True
+            if parent in not_types:
+                return False
+        return False
+
     if child_name == "Slice":
         if parents[-1] != ("Subscript", "slice") or parents[-2:] != [
             ("Subscript", "slice"),
@@ -92,18 +92,61 @@ def propability(parents, child_name):
         ]:
             return 0
 
-    if parents[-1][0] == "FormattedValue" and child_name != "Constant":
+    if parents[-1] == ("FormattedValue", "value") and child_name != "Constant":
         return 0
+
+    if parents[-1] == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
+        return 0
+
+    if parents[-1] == ("JoinedStr", "values") and child_name not in (
+        "Constant",
+        "FormattedValue",
+    ):
+        return 0
+
+    if child_name == "JoinedStr" and parent_types.count("JoinedStr") >= 2:
+        return 0
+
+    if child_name == "FormattedValue" and parents[-1][0] != "JoinedStr":
+        # TODO: doc says this should be valid, maybe a bug in the python doc
+        return 0
+
+    if child_name == "Nonlocal" and not inside(("FunctionDef", "AsyncFunctionDef")):
+        return 0
+
+    if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
+        # TODO: find all allowed key types
+        return 0
+
+    if child_name=="MatchStar" and parent_types[-1]!="MatchSequence":
+        return 0
+
+    if child_name == "Starred" and parents[-1] not in (
+        ("Tuple", "elts"),
+        ("Call", "args"),
+        ("List", "elts"),
+        ("Set", "elts"),
+    ):
+        return 0
+
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-    if parents[-1] in [("For", "target"), ("AsyncFor", "target"),("AnnAssign","target")]:
+    if parents[-1] in [
+        ("For", "target"),
+        ("AsyncFor", "target"),
+        ("AnnAssign", "target"),
+        ("AugAssign", "target"),
+    ]:
         if child_name not in assign_target:
             return 0
 
+    if parents[-1] in [("AugAssign", "target")]:
+        if child_name in ("Starred"):
+            return 0
 
     if child_name == "AsyncFor":
-        for parent,_ in reversed(parents):
+        for parent, _ in reversed(parents):
             if parent == "AsyncFunctionDef":
                 break
         else:
@@ -112,38 +155,115 @@ def propability(parents, child_name):
     return 1
 
 
-def fix(node):
+def fix(node, parents):
     if isinstance(node, ast.ImportFrom):
         if node.module == None and (node.level == None or node.level == 0):
-            node.level=1
+            node.level = 1
 
     if isinstance(node, ast.ExceptHandler):
         if node.type is None:
-            node.name=None
-            
-    if isinstance(node,ast.AsyncFunctionDef):
-        seen=set()
-        for args in (node.args.posonlyargs,node.args.args, node.args.kwonlyargs):
-            for i,arg in reversed(list(enumerate(args))):
+            node.name = None
+
+    if isinstance(node, ast.Constant):
+        # TODO: what is Constant.kind
+        node.kind = None
+        if parents[-1][0] == "JoinedStr":
+            # TODO: better format string generation
+            node.value = "text"
+
+    if isinstance(node, ast.FormattedValue):
+        node.conversion = [-1, 115, 114, 97][node.conversion % 4]
+
+    if hasattr(node, "ctx"):
+        if parents[-1] == ("Delete", "targets"):
+            node.ctx = ast.Del()
+        elif parents[-1] in (("Assign", "targets"), ("For", "target")):
+            node.ctx = ast.Store()
+        else:
+            node.ctx = ast.Load()
+
+    if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
+        # unique argument names
+        seen = set()
+        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+            for i, arg in reversed(list(enumerate(args))):
                 if arg.arg in seen:
                     del args[i]
                 seen.add(arg.arg)
 
-        if node.args.vararg and  node.args.vararg.arg in seen:
+        if node.args.vararg and node.args.vararg.arg in seen:
             seen.add(node.args.vararg.arg)
-            node.args.vararg=None
+            node.args.vararg = None
 
         if node.args.kwarg and node.args.kwarg.arg in seen:
             seen.add(node.args.kwarg.arg)
-            node.args.kwarg=None
+            node.args.kwarg = None
+
+    if isinstance(node, (ast.Try)):
+        node.handlers[:-1] = [
+            handler for handler in node.handlers[:-1] if handler.type is not None
+        ]
+        if not node.handlers:
+            node.orelse = []
+
+    if isinstance(node, ast.TryStar):
+        node.handlers = [
+            handler for handler in node.handlers if handler.type is not None
+        ]
+        if not node.handlers:
+            node.orelse = []
+
+    if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,ast.Module)):
+        try:
+            code=ast.unparse(ast.fix_missing_locations(node))
+            print(code)
+            compile(code,"<string>","exec")
+        except SyntaxError as e:
+            re.match()
+            print(e)
 
 
-    
+    in_async_code = False
+    for parent, _ in reversed(parents):
+        if parent == "AsyncFunctionDef":
+            in_async_code = True
+            break
+        if parent in ("FunctionDef", "Lamda"):
+            break
+
+    if hasattr(node, "generators"):
+        if not in_async_code:
+            for comp in node.generators:
+                comp.is_async = 0
+
+    in_excepthandler = False
+    for parent, _ in reversed(parents):
+        if parent == "ExceptHandler":
+            in_excepthandler = True
+            break
+        if parent in ("FunctionDef", "Lamda", "AsyncFunctionDef"):
+            break
+
+    if isinstance(node, ast.Raise):
+        if not in_excepthandler:
+            node.cause = None
+
+    if isinstance(node, ast.Lambda):
+        # no annotation for lambda arguments
+        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+            for arg in args:
+                arg.annotation = None
+
+        if node.args.vararg:
+            node.args.vararg.annotation = None
+
+        if node.args.kwarg:
+            node.args.kwarg.annotation = None
 
 
 class AstGenerator:
-    def __init__(self):
-        self.rand = random.Random(3)
+    def __init__(self, seed=0):
+        self.rand = random.Random(seed)
         self.nodes = 0
 
     def cnd(self):
@@ -159,19 +279,6 @@ class AstGenerator:
         stop = depth > 5 or self.nodes > 1000000
 
         info = get_info(name)
-
-        if name == "JoinedStr":
-            return info.ast_type(
-                values=[
-                    self.rand.choice(
-                        [
-                            self.generate("FormattedValue", parents, depth),
-                            ast.Constant(value="some text"),
-                        ]
-                    )
-                    for _ in range(0, 5)
-                ]
-            )
 
         if isinstance(info, NodeType):
             ranges = {}
@@ -206,22 +313,25 @@ class AstGenerator:
                 for n, (t, q) in info.fields.items()
             }
 
-            result=info.ast_type(**attributes)
-            fix(result)
+            result = info.ast_type(**attributes)
+            fix(result, parents)
             return result
 
-
         if isinstance(info, UnionNodeType):
-            options = info.options
-            weights = [propability(parents, option) for option in options]
+            options = {option: propability(parents, option) for option in info.options}
             if stop:
                 for final in ("Name", "MatchValue", "Pass"):
-                    if final in options:
-                        options = [final]
-                        weights = [1]
+                    if options.get(final, 0) != 0:
+                        options = {final: 1}
                         break
 
-            return self.generate(self.rand.choices(options, weights)[0], parents, depth)
+            if sum(options.values()) == 0:
+                # TODO: better handling of `type?`
+                return None
+
+            return self.generate(
+                self.rand.choices(*zip(*options.items()))[0], parents, depth
+            )
         if isinstance(info, BuiltinNodeType):
             if info.kind == "identifier":
                 return f"name_{self.rand.randint(0,5)}"
@@ -242,13 +352,14 @@ class AstGenerator:
 
 import tempfile
 
-with tempfile.NamedTemporaryFile("w") as file:
-
-    tree = AstGenerator().generate("Module")
-    print(ast.dump(tree, indent=2))
-    ast.fix_missing_locations(tree)
-    source=ast.unparse(tree)
-    print(source)
-    file.write(source)
-    file.flush()
-    compile(ast.unparse(tree), file.name, "exec")
+for seed in range(1000):
+    print("seed:", seed)
+    with tempfile.NamedTemporaryFile("w") as file:
+        tree = AstGenerator(seed).generate("Module")
+        print(ast.dump(tree, indent=2))
+        ast.fix_missing_locations(tree)
+        source = ast.unparse(tree)
+        print(source)
+        file.write(source)
+        file.flush()
+        compile(ast.unparse(tree), file.name, "exec")
