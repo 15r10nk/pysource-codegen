@@ -78,8 +78,12 @@ def propability(parents, child_name):
     parent_types = [p[0] for p in parents]
 
     def inside(types, not_types=()):
-        for parent in reversed(parent_types):
-            if parent in types:
+        if not isinstance(types,tuple):
+            types=(types,)
+
+        for parent,arg in reversed(parents):
+            qual_parent=f"{parent}.{arg}"
+            if any( qual_parent == t if "." in t else parent==t for t in types):
                 return True
             if parent in not_types:
                 return False
@@ -111,14 +115,16 @@ def propability(parents, child_name):
         # TODO: doc says this should be valid, maybe a bug in the python doc
         return 0
 
-    if child_name == "Nonlocal" and not inside(("FunctionDef", "AsyncFunctionDef")):
+    if child_name in ("Nonlocal", "Return","Yield","YieldFrom") and not inside(
+        ("FunctionDef.body", "AsyncFunctionDef.body")
+    ):
         return 0
 
     if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
         # TODO: find all allowed key types
         return 0
 
-    if child_name=="MatchStar" and parent_types[-1]!="MatchSequence":
+    if child_name == "MatchStar" and parent_types[-1] != "MatchSequence":
         return 0
 
     if child_name == "Starred" and parents[-1] not in (
@@ -129,7 +135,6 @@ def propability(parents, child_name):
     ):
         return 0
 
-
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
     if parents[-1] in [
@@ -137,20 +142,34 @@ def propability(parents, child_name):
         ("AsyncFor", "target"),
         ("AnnAssign", "target"),
         ("AugAssign", "target"),
+        ("Assign", "targets"),
+        ("withitem", "optional_vars"),
     ]:
         if child_name not in assign_target:
             return 0
 
-    if parents[-1] in [("AugAssign", "target")]:
-        if child_name in ("Starred"):
+    if parents[-1] in [("AugAssign", "target"),("AnnAssign", "target")]:
+        if child_name in ("Starred", "List","Tuple"):
             return 0
 
-    if child_name == "AsyncFor":
-        for parent, _ in reversed(parents):
-            if parent == "AsyncFunctionDef":
-                break
-        else:
-            return 0
+    in_async_code = inside("AsyncFunctionDef.body", ("FunctionDef", "Lamda"))
+
+    if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
+        return 0
+
+    if child_name in ("YieldFrom",) and in_async_code:
+        return 0
+
+    in_loop = inside(("For.body", "While.body"), ("FunctionDef", "Lamda", "AsyncFunctionDef"))
+
+    if child_name in ("Break", "Continue") and not in_loop:
+        return 0
+
+    if inside(("MatchValue",)) and child_name not in ("Attribute", "Name"):
+        return 0
+
+    if parents[-1] == ("MatchValue", "value") and child_name == "Name":
+        return 0
 
     return 1
 
@@ -191,13 +210,22 @@ def fix(node, parents):
                     del args[i]
                 seen.add(arg.arg)
 
-        if node.args.vararg and node.args.vararg.arg in seen:
-            seen.add(node.args.vararg.arg)
-            node.args.vararg = None
+        for arg_name in ("kwarg", "vararg"):
+            arg = getattr(node.args, arg_name)
+            if arg:
+                if arg.arg in seen:
+                    setattr(node.args, arg_name, None)
+                seen.add(arg.arg)
 
-        if node.args.kwarg and node.args.kwarg.arg in seen:
-            seen.add(node.args.kwarg.arg)
-            node.args.kwarg = None
+
+    if isinstance(node, (ast.ClassDef,ast.Call)):
+        # unique argument names
+        seen = set()
+        for i, kw in reversed(list(enumerate(node.keywords))):
+            if kw.arg:
+                if kw.arg in seen:
+                    del node.keywords[i]
+                seen.add(kw.arg)
 
     if isinstance(node, (ast.Try)):
         node.handlers[:-1] = [
@@ -213,19 +241,82 @@ def fix(node, parents):
         if not node.handlers:
             node.orelse = []
 
-    if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,ast.Module)):
-        try:
-            code=ast.unparse(ast.fix_missing_locations(node))
-            print(code)
-            compile(code,"<string>","exec")
-        except SyntaxError as e:
-            re.match()
-            print(e)
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+        while True:
+            try:
+                code = ast.unparse(ast.fix_missing_locations(node))
+                compile(code, "<string>", "exec")
+                break
+            except SyntaxError as e:
 
+                m = re.match("name '(.*)' is used prior to global declaration", str(e))
+
+                if not m:
+                    m = re.match("name '(.*)' is assigned to before global declaration", str(e))
+
+                if not m:
+                    m = re.match("name '(.*)' is parameter and global", str(e))
+                if not m:
+                    m = re.match("annotated name '(.*)' can't be global", str(e))
+                if not m:
+                    m = re.match("name '(.*)' is nonlocal and global", str(e))
+
+                if m:
+                    name = m.group(1)
+                    class Transformer(ast.NodeTransformer):
+                        def visit_Global(self,node):
+                            if name in node.names:
+                                node.names.remove(name)
+                            if not node.names:
+                                return ast.Pass()
+                            return node
+                    node=Transformer().visit(node)
+                    continue
+
+                m = re.match("name '(.*)' is parameter and nonlocal", str(e))
+                if not m:
+                    m = re.match("name '(.*)' is used prior to nonlocal declaration", str(e))
+                if not m:
+                    m = re.match("no binding for nonlocal '(.*)' found", str(e))
+                if not m:
+                    m = re.match("name '(.*)' is assigned to before nonlocal declaration", str(e))
+                if not m:
+                    m = re.match("annotated name '(.*)' can't be nonlocal", str(e))
+
+                if m:
+                    name = m.group(1)
+                    class Transformer(ast.NodeTransformer):
+                        def visit_Nonlocal(self,node):
+                            if name in node.names:
+                                node.names.remove(name)
+                            if not node.names:
+                                return ast.Pass()
+                            return node
+                    node=Transformer().visit(node)
+                    continue
+                                
+                break
+
+    if isinstance(node, ast.Match):
+        found = False
+        new_last=None
+        for i, case_ in reversed(list(enumerate(node.cases))):
+            p = case_.pattern
+            if isinstance(p, ast.MatchAs) and p.pattern is None:
+                if not found:
+                    new_last=node.cases[i] 
+                    found = True
+                del node.cases[i]
+        if new_last:
+            node.cases.append(new_last)
+
+    if isinstance(node, ast.MatchAs):
+        if node.name is None:
+            node.pattern = None
 
     in_async_code = False
-    for parent, _ in reversed(parents):
-        if parent == "AsyncFunctionDef":
+    for parent, attr in reversed(parents):
+        if parent == "AsyncFunctionDef" and attr=="body":
             in_async_code = True
             break
         if parent in ("FunctionDef", "Lamda"):
@@ -260,6 +351,8 @@ def fix(node, parents):
         if node.args.kwarg:
             node.args.kwarg.annotation = None
 
+    return node
+
 
 class AstGenerator:
     def __init__(self, seed=0):
@@ -276,14 +369,14 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 5 or self.nodes > 1000000
+        stop = depth > 6 or self.nodes > 1000000
 
         info = get_info(name)
 
         if isinstance(info, NodeType):
             ranges = {}
 
-            def range_for(attr_name):
+            def range_for(child, attr_name):
                 if name == "MatchClass" and attr_name == "kwd_patterns":
                     attr_name = "kwd_attrs"
 
@@ -292,9 +385,11 @@ class AstGenerator:
 
                 if attr_name not in ranges:
                     min = 1 if attr_name == "body" else 0
+                    if child == "MatchOr" and attr_name == "patterns":
+                        min = 2
                     max = min if stop else min + 1 if depth > 10 else min + 5
                     max = self.rand.randint(min + 1, max + 1)
-                    ranges[attr_name] = range(min, max)
+                    ranges[attr_name] = range(0, max)
 
                 return ranges[attr_name]
 
@@ -302,7 +397,10 @@ class AstGenerator:
                 if q == "":
                     return self.generate(t, parents, depth)
                 elif q == "*":
-                    return [self.generate(t, parents, depth) for _ in range_for(n)]
+                    return [
+                        self.generate(t, parents, depth)
+                        for _ in range_for(parents[-1][0], n)
+                    ]
                 elif q == "?":
                     return self.generate(t, parents, depth) if self.cnd() else None
                 else:
@@ -314,7 +412,7 @@ class AstGenerator:
             }
 
             result = info.ast_type(**attributes)
-            fix(result, parents)
+            result = fix(result, parents)
             return result
 
         if isinstance(info, UnionNodeType):
@@ -351,15 +449,20 @@ class AstGenerator:
 
 
 import tempfile
+import traceback
 
-for seed in range(1000):
+for seed in range(10000):
     print("seed:", seed)
     with tempfile.NamedTemporaryFile("w") as file:
         tree = AstGenerator(seed).generate("Module")
-        print(ast.dump(tree, indent=2))
         ast.fix_missing_locations(tree)
         source = ast.unparse(tree)
-        print(source)
         file.write(source)
         file.flush()
-        compile(ast.unparse(tree), file.name, "exec")
+        try:
+            compile(ast.unparse(tree), file.name, "exec")
+        except Exception as e:
+            print(ast.dump(tree, indent=2))
+            print(source)
+            traceback.print_exc()
+            exit(1)
