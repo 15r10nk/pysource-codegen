@@ -74,18 +74,31 @@ type_infos["_deleteTargets"] = UnionNodeType(options=["Name", "Attribute", "Subs
 import random
 
 
+def only_firstone(l, condition):
+    found = False
+    for i, e in reversed(list(enumerate(l))):
+        if condition(e):
+            if found:
+                del l[i]
+            found = True
+
+
+def unique_by(l, key):
+    return list({key(e): e for e in l}.values())
+
+
 def propability(parents, child_name):
     parent_types = [p[0] for p in parents]
 
     def inside(types, not_types=()):
-        if not isinstance(types,tuple):
-            types=(types,)
+        if not isinstance(types, tuple):
+            types = (types,)
 
-        for parent,arg in reversed(parents):
-            qual_parent=f"{parent}.{arg}"
-            if any( qual_parent == t if "." in t else parent==t for t in types):
+        for parent, arg in reversed(parents):
+            qual_parent = f"{parent}.{arg}"
+            if any(qual_parent == t if "." in t else parent == t for t in types):
                 return True
-            if parent in not_types:
+            if any(qual_parent == t if "." in t else parent == t for t in not_types):
                 return False
         return False
 
@@ -115,9 +128,13 @@ def propability(parents, child_name):
         # TODO: doc says this should be valid, maybe a bug in the python doc
         return 0
 
-    if child_name in ("Nonlocal", "Return","Yield","YieldFrom") and not inside(
-        ("FunctionDef.body", "AsyncFunctionDef.body")
-    ):
+    if child_name in (
+        "Nonlocal",
+        "Return",
+        "Yield",
+        "YieldFrom",
+        "Continue",
+    ) and not inside(("FunctionDef.body", "AsyncFunctionDef.body"), ("ClassDef.body",)):
         return 0
 
     if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
@@ -137,22 +154,32 @@ def propability(parents, child_name):
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-    if parents[-1] in [
+    if [p for p in parents if p[0] not in ("Tuple", "List")][-1] in [
         ("For", "target"),
         ("AsyncFor", "target"),
         ("AnnAssign", "target"),
         ("AugAssign", "target"),
         ("Assign", "targets"),
         ("withitem", "optional_vars"),
+        ("comprehension", "target"),
     ]:
         if child_name not in assign_target:
             return 0
 
-    if parents[-1] in [("AugAssign", "target"),("AnnAssign", "target")]:
-        if child_name in ("Starred", "List","Tuple"):
+    if parents[-1] in [("AugAssign", "target"), ("AnnAssign", "target")]:
+        if child_name in ("Starred", "List", "Tuple"):
             return 0
 
-    in_async_code = inside("AsyncFunctionDef.body", ("FunctionDef", "Lamda"))
+    if parents[-1] in [("AnnAssign", "target")]:
+        if child_name != "Name":
+            return 0
+
+    if parents[-1] in [("NamedExpr", "target")] and child_name != "Name":
+        return 0
+
+    in_async_code = inside(
+        "AsyncFunctionDef.body", ("FunctionDef.body", "Lamda.body", "ClassDef.body")
+    )
 
     if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
         return 0
@@ -160,7 +187,10 @@ def propability(parents, child_name):
     if child_name in ("YieldFrom",) and in_async_code:
         return 0
 
-    in_loop = inside(("For.body", "While.body"), ("FunctionDef", "Lamda", "AsyncFunctionDef"))
+    in_loop = inside(
+        ("For.body", "While.body"),
+        ("FunctionDef.body", "Lamda.body", "AsyncFunctionDef.body", "ClassDef.body"),
+    )
 
     if child_name in ("Break", "Continue") and not in_loop:
         return 0
@@ -170,6 +200,10 @@ def propability(parents, child_name):
 
     if parents[-1] == ("MatchValue", "value") and child_name == "Name":
         return 0
+
+    if inside("MatchClass.cls"):
+        if child_name not in ("Name", "Attribute", "Subscript"):
+            return 0
 
     return 1
 
@@ -196,10 +230,17 @@ def fix(node, parents):
     if hasattr(node, "ctx"):
         if parents[-1] == ("Delete", "targets"):
             node.ctx = ast.Del()
-        elif parents[-1] in (("Assign", "targets"), ("For", "target")):
+        elif parents[-1] in (
+            ("Assign", "targets"),
+            ("For", "target"),
+            ("withitem", "optional_vars"),
+        ):
             node.ctx = ast.Store()
         else:
             node.ctx = ast.Load()
+
+    if isinstance(node, (ast.List, ast.Tuple)) and isinstance(node.ctx, ast.Store):
+        only_firstone(node.elts, lambda e: isinstance(e, ast.Starred))
 
     if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         # unique argument names
@@ -217,8 +258,17 @@ def fix(node, parents):
                     setattr(node.args, arg_name, None)
                 seen.add(arg.arg)
 
+    if isinstance(node, ast.AsyncFunctionDef):
+        if any(
+            isinstance(n, (ast.Yield, ast.YieldFrom))
+            for b in node.body
+            for n in ast.walk(b)
+        ):
+            for n in ast.walk(node):
+                if isinstance(n, ast.Return):
+                    n.value = None
 
-    if isinstance(node, (ast.ClassDef,ast.Call)):
+    if isinstance(node, (ast.ClassDef, ast.Call)):
         # unique argument names
         seen = set()
         for i, kw in reversed(list(enumerate(node.keywords))):
@@ -241,18 +291,37 @@ def fix(node, parents):
         if not node.handlers:
             node.orelse = []
 
+    if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)):
+        names = [
+            n.id
+            for c in node.generators
+            for n in ast.walk(c.target)
+            if isinstance(n, ast.Name)
+        ]
+
+        class Transformer(ast.NodeTransformer):
+            def visit_NamedExpr(self, node: ast.NamedExpr):
+                if node.target.id in names:
+                    return node.value
+                return node
+
+        node = Transformer().visit(node)
+
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
         while True:
             try:
                 code = ast.unparse(ast.fix_missing_locations(node))
                 compile(code, "<string>", "exec")
                 break
+            except ValueError:
+                break
             except SyntaxError as e:
-
                 m = re.match("name '(.*)' is used prior to global declaration", str(e))
 
                 if not m:
-                    m = re.match("name '(.*)' is assigned to before global declaration", str(e))
+                    m = re.match(
+                        "name '(.*)' is assigned to before global declaration", str(e)
+                    )
 
                 if not m:
                     m = re.match("name '(.*)' is parameter and global", str(e))
@@ -263,52 +332,68 @@ def fix(node, parents):
 
                 if m:
                     name = m.group(1)
+
                     class Transformer(ast.NodeTransformer):
-                        def visit_Global(self,node):
+                        def visit_Global(self, node):
                             if name in node.names:
                                 node.names.remove(name)
                             if not node.names:
                                 return ast.Pass()
                             return node
-                    node=Transformer().visit(node)
+
+                    node = Transformer().visit(node)
                     continue
 
                 m = re.match("name '(.*)' is parameter and nonlocal", str(e))
                 if not m:
-                    m = re.match("name '(.*)' is used prior to nonlocal declaration", str(e))
+                    m = re.match(
+                        "name '(.*)' is used prior to nonlocal declaration", str(e)
+                    )
                 if not m:
                     m = re.match("no binding for nonlocal '(.*)' found", str(e))
                 if not m:
-                    m = re.match("name '(.*)' is assigned to before nonlocal declaration", str(e))
+                    m = re.match(
+                        "name '(.*)' is assigned to before nonlocal declaration", str(e)
+                    )
                 if not m:
                     m = re.match("annotated name '(.*)' can't be nonlocal", str(e))
 
                 if m:
                     name = m.group(1)
+
                     class Transformer(ast.NodeTransformer):
-                        def visit_Nonlocal(self,node):
+                        def visit_Nonlocal(self, node):
                             if name in node.names:
                                 node.names.remove(name)
                             if not node.names:
                                 return ast.Pass()
                             return node
-                    node=Transformer().visit(node)
+
+                    node = Transformer().visit(node)
                     continue
-                                
+
                 break
 
     if isinstance(node, ast.Match):
         found = False
-        new_last=None
+        new_last = None
         for i, case_ in reversed(list(enumerate(node.cases))):
             p = case_.pattern
             if isinstance(p, ast.MatchAs) and p.pattern is None:
                 if not found:
-                    new_last=node.cases[i] 
+                    new_last = node.cases[i]
                     found = True
                 del node.cases[i]
         if new_last:
             node.cases.append(new_last)
+
+    if isinstance(node, ast.MatchClass):
+        node.kwd_attrs = list(set(node.kwd_attrs))
+        del node.kwd_patterns[len(node.kwd_attrs) :]
+
+    if isinstance(node, ast.MatchMapping):
+        node.keys = unique_by(node.keys, ast.literal_eval)
+        del node.patterns[len(node.keys) :]
 
     if isinstance(node, ast.MatchAs):
         if node.name is None:
@@ -316,7 +401,7 @@ def fix(node, parents):
 
     in_async_code = False
     for parent, attr in reversed(parents):
-        if parent == "AsyncFunctionDef" and attr=="body":
+        if parent == "AsyncFunctionDef" and attr == "body":
             in_async_code = True
             break
         if parent in ("FunctionDef", "Lamda"):
@@ -336,8 +421,11 @@ def fix(node, parents):
             break
 
     if isinstance(node, ast.Raise):
-        if not in_excepthandler:
+        if not in_excepthandler or not node.exc:
             node.cause = None
+
+        if not in_excepthandler and not node.exc:
+            return ast.Pass()
 
     if isinstance(node, ast.Lambda):
         # no annotation for lambda arguments
@@ -369,7 +457,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 6 or self.nodes > 1000000
+        stop = depth > 7 or self.nodes > 1000000
 
         info = get_info(name)
 
@@ -456,13 +544,14 @@ for seed in range(10000):
     with tempfile.NamedTemporaryFile("w") as file:
         tree = AstGenerator(seed).generate("Module")
         ast.fix_missing_locations(tree)
-        source = ast.unparse(tree)
-        file.write(source)
-        file.flush()
         try:
+            source = ast.unparse(tree)
+            file.write(source)
+            file.flush()
             compile(ast.unparse(tree), file.name, "exec")
         except Exception as e:
             print(ast.dump(tree, indent=2))
             print(source)
             traceback.print_exc()
+            print("last seed:", seed)
             exit(1)
