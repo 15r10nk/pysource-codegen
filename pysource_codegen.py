@@ -205,6 +205,11 @@ def propability(parents, child_name):
         if child_name not in ("Name", "Attribute", "Subscript"):
             return 0
 
+    if parents[-1]==("comprehension","iter") and child_name == "NamedExpr":
+        return 0
+
+
+
     return 1
 
 
@@ -399,6 +404,41 @@ def fix(node, parents):
         if node.name is None:
             node.pattern = None
 
+    if isinstance(node,ast.MatchOr):
+        def names(pattern):
+            for n in ast.walk(pattern):
+                if isinstance(n,ast.MatchAs):
+                    if n.name:
+                        yield n.name
+                if isinstance(n,ast.MatchMapping):
+                    if n.rest:
+                        yield n.rest
+        var_names=set.intersection(*[set(names(pattern)) for pattern in node.patterns])
+
+
+        class Transformer(ast.NodeVisitor):
+            def visit_MatchAs(self, node):
+                if node.name not in var_names:
+                    node.name = None
+            def visit_MatchMapping(self, node):
+                if node.rest not in var_names:
+                    node.rest = None
+
+        Transformer().visit(node)
+
+        for i,e in enumerate(node.patterns):
+            if isinstance(e,ast.MatchAs) and e.name==None:
+                print("del",i,e)
+                node.patterns = node.patterns[:i+1]
+                break
+
+
+
+    if isinstance(node,ast.MatchSequence):
+        only_firstone(node.patterns,lambda e: isinstance(e,ast.MatchStar))
+
+        
+
     in_async_code = False
     for parent, attr in reversed(parents):
         if parent == "AsyncFunctionDef" and attr == "body":
@@ -536,3 +576,22 @@ class AstGenerator:
         assert False
 
 
+import tempfile
+import traceback
+
+for seed in range(10000):
+    print("seed:", seed)
+    with tempfile.NamedTemporaryFile("w") as file:
+        tree = AstGenerator(seed).generate("Module")
+        ast.fix_missing_locations(tree)
+        try:
+            source = ast.unparse(tree)
+            file.write(source)
+            file.flush()
+            compile(ast.unparse(tree), file.name, "exec")
+        except Exception as e:
+            print(ast.dump(tree, indent=2))
+            print(source)
+            traceback.print_exc()
+            print("last seed:", seed)
+            exit(1)
