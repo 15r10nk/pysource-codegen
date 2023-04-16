@@ -154,7 +154,7 @@ def propability(parents, child_name):
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-    if [p for p in parents if p[0] not in ("Tuple", "List")][-1] in [
+    if [p for p in parents if p[0] not in ("Tuple", "List","Starred")][-1] in [
         ("For", "target"),
         ("AsyncFor", "target"),
         ("AnnAssign", "target"),
@@ -195,6 +195,10 @@ def propability(parents, child_name):
     if child_name in ("Break", "Continue") and not in_loop:
         return 0
 
+    if inside("TryStar.handlers") and child_name in ("Break","Continue","Return"):
+        # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
+        return 0
+
     if inside(("MatchValue",)) and child_name not in ("Attribute", "Name"):
         return 0
 
@@ -202,13 +206,11 @@ def propability(parents, child_name):
         return 0
 
     if inside("MatchClass.cls"):
-        if child_name not in ("Name", "Attribute", "Subscript"):
+        if child_name not in ("Name", "Attribute"):
             return 0
 
-    if parents[-1]==("comprehension","iter") and child_name == "NamedExpr":
+    if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
         return 0
-
-
 
     return 1
 
@@ -303,6 +305,13 @@ def fix(node, parents):
             for n in ast.walk(c.target)
             if isinstance(n, ast.Name)
         ]
+        # TODO
+        #+[
+        #    n.id
+        #    for c in node.generators
+        #    for n in ast.walk(c.iter)
+        #    if isinstance(n, ast.Name)
+        #]
 
         class Transformer(ast.NodeTransformer):
             def visit_NamedExpr(self, node: ast.NamedExpr):
@@ -392,59 +401,129 @@ def fix(node, parents):
         if new_last:
             node.cases.append(new_last)
 
-    if isinstance(node, ast.MatchClass):
-        node.kwd_attrs = list(set(node.kwd_attrs))
-        del node.kwd_patterns[len(node.kwd_attrs) :]
+    def names(pattern):
+        for n in ast.walk(pattern):
+            if isinstance(n, ast.MatchAs):
+                if n.name:
+                    yield n.name
+            if isinstance(n, ast.MatchMapping):
+                if n.rest:
+                    yield n.rest
+
+    class RemoveName(ast.NodeVisitor):
+        def __init__(self, condition):
+            self.condition = condition
+
+        def visit_MatchAs(self, node):
+            if self.condition(node.name):
+                node.name = None
+
+        def visit_MatchMapping(self, node):
+            if self.condition(node.rest):
+                node.rest = None
+
+    class FixPatternNames(ast.NodeVisitor):
+        def __init__(self,used=None,allowed=None):
+            self.used = set() if used is None else used
+            self.allowed = allowed
+
+        def condition(self,name):
+            return name not in self.used and (name in self.allowed if self.allowed is not None else True)
+
+        def visit_MatchAs(self, node):
+            if self.condition(node.name):
+                node.name = None
+            else:
+                self.used.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchMapping(self, node):
+            if self.condition(node.rest):
+                node.rest = None
+            else:
+                self.used.add(node.rest)
+            self.generic_visit(node)
+        
+        def visit_MatchOr(self, node: ast.MatchOr):
+            allowed = set.intersection(
+                *[set(names(pattern)) for pattern in node.patterns]
+            )
+            allowed-=self.used
+
+            for child in node.patterns:
+                FixPatternNames(self.used,allowed).visit(child)
+
+            self.used|=allowed
+            
+
+    if isinstance(node,ast.match_case):
+        FixPatternNames().visit(node.pattern)
+
 
     if isinstance(node, ast.MatchMapping):
         node.keys = unique_by(node.keys, ast.literal_eval)
         del node.patterns[len(node.keys) :]
 
+        seen = set()
+        for pattern in node.patterns:
+            RemoveName(lambda name: name in seen).visit(pattern)
+            seen |= {*names(pattern)}
+
     if isinstance(node, ast.MatchAs):
         if node.name is None:
             node.pattern = None
 
-    if isinstance(node,ast.MatchOr):
-        def names(pattern):
-            for n in ast.walk(pattern):
-                if isinstance(n,ast.MatchAs):
-                    if n.name:
-                        yield n.name
-                if isinstance(n,ast.MatchMapping):
-                    if n.rest:
-                        yield n.rest
-        var_names=set.intersection(*[set(names(pattern)) for pattern in node.patterns])
+    if isinstance(node, ast.MatchOr):
+        var_names = set.intersection(
+            *[set(names(pattern)) for pattern in node.patterns]
+        )
 
+        RemoveName(lambda name: name not in var_names).visit(node)
 
-        class Transformer(ast.NodeVisitor):
-            def visit_MatchAs(self, node):
-                if node.name not in var_names:
-                    node.name = None
-            def visit_MatchMapping(self, node):
-                if node.rest not in var_names:
-                    node.rest = None
-
-        Transformer().visit(node)
-
-        for i,e in enumerate(node.patterns):
-            if isinstance(e,ast.MatchAs) and e.name==None:
-                print("del",i,e)
-                node.patterns = node.patterns[:i+1]
+        for i, e in enumerate(node.patterns):
+            if isinstance(e, ast.MatchAs) and e.name == None:
+                node.patterns = node.patterns[: i + 1]
                 break
 
+        if len(node.patterns) == 1:
+            return node.patterns[0]
 
 
-    if isinstance(node,ast.MatchSequence):
-        only_firstone(node.patterns,lambda e: isinstance(e,ast.MatchStar))
+    if isinstance(node, ast.Match):
+        for i, e in enumerate(node.cases):
+            if (
+                isinstance(e.pattern, ast.MatchAs)
+                and e.pattern.name is None
+                or isinstance(e.pattern, ast.MatchOr)
+                and isinstance(e.pattern.patterns[-1], ast.MatchAs)
+                and e.pattern.patterns[-1].name is None
+            ):
+                node.cases = node.cases[: i + 1]
+                break
 
-        
+    if isinstance(node, ast.MatchSequence):
+        only_firstone(node.patterns, lambda e: isinstance(e, ast.MatchStar))
+
+        seen = set()
+        for pattern in node.patterns:
+            RemoveName(lambda name: name in seen).visit(pattern)
+            seen |= {*names(pattern)}
+
+    if isinstance(node, ast.MatchClass):
+        node.kwd_attrs = list(set(node.kwd_attrs))
+        del node.kwd_patterns[len(node.kwd_attrs) :]
+
+        seen = set()
+        for pattern in [*node.patterns, *node.kwd_patterns]:
+            RemoveName(lambda name: name in seen).visit(pattern)
+            seen |= {*names(pattern)}
 
     in_async_code = False
     for parent, attr in reversed(parents):
         if parent == "AsyncFunctionDef" and attr == "body":
             in_async_code = True
             break
-        if parent in ("FunctionDef", "Lamda"):
+        if parent in ("FunctionDef", "Lamda","ClassDef"):
             break
 
     if hasattr(node, "generators"):
@@ -497,7 +576,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 7 or self.nodes > 1000000
+        stop = depth > 8 or self.nodes > 1000000
 
         info = get_info(name)
 
@@ -576,22 +655,3 @@ class AstGenerator:
         assert False
 
 
-import tempfile
-import traceback
-
-for seed in range(10000):
-    print("seed:", seed)
-    with tempfile.NamedTemporaryFile("w") as file:
-        tree = AstGenerator(seed).generate("Module")
-        ast.fix_missing_locations(tree)
-        try:
-            source = ast.unparse(tree)
-            file.write(source)
-            file.flush()
-            compile(ast.unparse(tree), file.name, "exec")
-        except Exception as e:
-            print(ast.dump(tree, indent=2))
-            print(source)
-            traceback.print_exc()
-            print("last seed:", seed)
-            exit(1)

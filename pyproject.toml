@@ -14,6 +14,9 @@ hypothesmith = "^0.2.3"
 hypofuzz = "^22.12.1"
 
 
+[tool.poetry.group.dev.dependencies]
+rich = "^13.3.4"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
