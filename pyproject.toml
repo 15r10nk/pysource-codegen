@@ -1,21 +1,19 @@
 [tool.poetry]
-name = "hypothesis-python-codegen"
+name = "pysource-codegen"
 version = "0.1.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
-packages = [{include = "hypothesis_python_codegen"}]
+packages = [{include = "pysource_codegen"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-hypothesis = "^6.65.2"
 pytest = "^7.2.1"
-hypothesmith = "^0.2.3"
-hypofuzz = "^22.12.1"
 
 
 [tool.poetry.group.dev.dependencies]
 rich = "^13.3.4"
+pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
 
 [build-system]
 requires = ["poetry-core"]

@@ -12,7 +12,7 @@ from rich.console import Console
 
 @pytest.mark.parametrize("seed",list(range(1000)))
 def test_codegen(seed):
-    with tempfile.NamedTemporaryFile("w") as file:
+    with tempfile.NamedTemporaryFile("w",delete=False) as file:
         tree = AstGenerator(seed).generate("Module")
         ast.fix_missing_locations(tree)
         try:

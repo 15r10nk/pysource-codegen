@@ -154,7 +154,7 @@ def propability(parents, child_name):
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-    if [p for p in parents if p[0] not in ("Tuple", "List","Starred")][-1] in [
+    if [p for p in parents if p[0] not in ("Tuple", "List", "Starred")][-1] in [
         ("For", "target"),
         ("AsyncFor", "target"),
         ("AnnAssign", "target"),
@@ -178,7 +178,7 @@ def propability(parents, child_name):
         return 0
 
     in_async_code = inside(
-        "AsyncFunctionDef.body", ("FunctionDef.body", "Lamda.body", "ClassDef.body")
+        "AsyncFunctionDef.body", ("FunctionDef.body", "Lambda.body", "ClassDef.body")
     )
 
     if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
@@ -189,13 +189,13 @@ def propability(parents, child_name):
 
     in_loop = inside(
         ("For.body", "While.body"),
-        ("FunctionDef.body", "Lamda.body", "AsyncFunctionDef.body", "ClassDef.body"),
+        ("FunctionDef.body", "Lambda.body", "AsyncFunctionDef.body", "ClassDef.body"),
     )
 
     if child_name in ("Break", "Continue") and not in_loop:
         return 0
 
-    if inside("TryStar.handlers") and child_name in ("Break","Continue","Return"):
+    if inside("TryStar.handlers") and child_name in ("Break", "Continue", "Return"):
         # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
         return 0
 
@@ -210,6 +210,32 @@ def propability(parents, child_name):
             return 0
 
     if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
+        return 0
+
+    if inside(
+        ("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp")
+    ) and child_name in ("Yield", "YieldFrom"):
+        # SyntaxError: 'yield' inside list comprehension
+        return 0
+
+    if (
+        inside(
+            (
+                "GeneratorExp",
+                "ListComp",
+                "SetComp",
+                "DictComp",
+                "DictComp",
+            )
+        )
+        # TODO restrict to comprehension inside ClassDef
+        and inside(
+            "ClassDef.body",
+            ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"),
+        )
+        and child_name == "NamedExpr"
+    ):
+        # SyntaxError: assignment expression within a comprehension cannot be used in a class body
         return 0
 
     return 1
@@ -237,10 +263,12 @@ def fix(node, parents):
     if hasattr(node, "ctx"):
         if parents[-1] == ("Delete", "targets"):
             node.ctx = ast.Del()
-        elif parents[-1] in (
+        elif [p for p in parents if p[0] not in ("Tuple", "List", "Starred")][-1] in (
             ("Assign", "targets"),
             ("For", "target"),
+            ("AsyncFor", "target"),
             ("withitem", "optional_vars"),
+            ("comprehension", "target"),
         ):
             node.ctx = ast.Store()
         else:
@@ -299,25 +327,24 @@ def fix(node, parents):
             node.orelse = []
 
     if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)):
-        names = [
+        # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
+        names = {
             n.id
             for c in node.generators
             for n in ast.walk(c.target)
             if isinstance(n, ast.Name)
-        ]
-        # TODO
-        #+[
-        #    n.id
-        #    for c in node.generators
-        #    for n in ast.walk(c.iter)
-        #    if isinstance(n, ast.Name)
-        #]
+        } | {
+            n.id
+            for c in node.generators
+            for n in ast.walk(c.iter)
+            if isinstance(n, ast.Name)
+        }
 
         class Transformer(ast.NodeTransformer):
             def visit_NamedExpr(self, node: ast.NamedExpr):
                 if node.target.id in names:
-                    return node.value
-                return node
+                    return self.visit(node.value)
+                return self.generic_visit(node)
 
         node = Transformer().visit(node)
 
@@ -423,12 +450,14 @@ def fix(node, parents):
                 node.rest = None
 
     class FixPatternNames(ast.NodeVisitor):
-        def __init__(self,used=None,allowed=None):
+        def __init__(self, used=None, allowed=None):
             self.used = set() if used is None else used
             self.allowed = allowed
 
-        def condition(self,name):
-            return name not in self.used and (name in self.allowed if self.allowed is not None else True)
+        def condition(self, name):
+            return name not in self.used and (
+                name in self.allowed if self.allowed is not None else True
+            )
 
         def visit_MatchAs(self, node):
             if self.condition(node.name):
@@ -443,22 +472,20 @@ def fix(node, parents):
             else:
                 self.used.add(node.rest)
             self.generic_visit(node)
-        
+
         def visit_MatchOr(self, node: ast.MatchOr):
             allowed = set.intersection(
                 *[set(names(pattern)) for pattern in node.patterns]
             )
-            allowed-=self.used
+            allowed -= self.used
 
             for child in node.patterns:
-                FixPatternNames(self.used,allowed).visit(child)
+                FixPatternNames(self.used, allowed).visit(child)
 
-            self.used|=allowed
-            
+            self.used |= allowed
 
-    if isinstance(node,ast.match_case):
+    if isinstance(node, ast.match_case):
         FixPatternNames().visit(node.pattern)
-
 
     if isinstance(node, ast.MatchMapping):
         node.keys = unique_by(node.keys, ast.literal_eval)
@@ -487,7 +514,6 @@ def fix(node, parents):
 
         if len(node.patterns) == 1:
             return node.patterns[0]
-
 
     if isinstance(node, ast.Match):
         for i, e in enumerate(node.cases):
@@ -523,7 +549,7 @@ def fix(node, parents):
         if parent == "AsyncFunctionDef" and attr == "body":
             in_async_code = True
             break
-        if parent in ("FunctionDef", "Lamda","ClassDef"):
+        if parent in ("FunctionDef", "Lambda", "ClassDef"):
             break
 
     if hasattr(node, "generators"):
@@ -536,7 +562,7 @@ def fix(node, parents):
         if parent == "ExceptHandler":
             in_excepthandler = True
             break
-        if parent in ("FunctionDef", "Lamda", "AsyncFunctionDef"):
+        if parent in ("FunctionDef", "Lambda", "AsyncFunctionDef"):
             break
 
     if isinstance(node, ast.Raise):
@@ -576,7 +602,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 8 or self.nodes > 1000000
+        stop = depth > 9 or self.nodes > 1000000
 
         info = get_info(name)
 
@@ -653,5 +679,3 @@ class AstGenerator:
                 assert False, "unknown kind: " + info.kind
 
         assert False
-
-
