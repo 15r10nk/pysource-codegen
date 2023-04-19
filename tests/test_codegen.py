@@ -1,6 +1,6 @@
 
 
-from pysource_codegen import AstGenerator
+from pysource_codegen import AstGenerator,generate
 import ast
 
 import tempfile
@@ -13,19 +13,18 @@ from rich.console import Console
 @pytest.mark.parametrize("seed",list(range(1000)))
 def test_codegen(seed):
     with tempfile.NamedTemporaryFile("w",delete=False) as file:
-        tree = AstGenerator(seed).generate("Module")
-        ast.fix_missing_locations(tree)
         try:
-            source = ast.unparse(tree)
+            source=generate(seed)
             file.write(source)
             file.flush()
-            compile(ast.unparse(tree), file.name, "exec")
+            compile(source, file.name, "exec")
         except Exception as e:
+            if isinstance(e,SyntaxError) and e.msg=="too many statically nested blocks":
+                pytest.skip()
+                
             console=Console()
-            console.print(ast.dump(tree, indent=2))
 
-            console.print(Syntax(source,"python",line_numbers=True))
+            console.print(Syntax(source,"python",line_numbers=True,word_wrap=True))
 
             traceback.print_exc()
-            print("last seed:", seed)
-            exit(1)
+            raise

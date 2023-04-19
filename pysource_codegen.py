@@ -415,12 +415,18 @@ def fix(node, parents):
 
                 break
 
+    def match_wildcard(node):
+        if isinstance(node, ast.MatchAs):
+            return node.pattern is None or match_wildcard(node.pattern) or node.name is None
+        if isinstance(node, ast.MatchOr):
+            return any(match_wildcard(p) for p in node.patterns)
+
     if isinstance(node, ast.Match):
         found = False
         new_last = None
         for i, case_ in reversed(list(enumerate(node.cases))):
             p = case_.pattern
-            if isinstance(p, ast.MatchAs) and p.pattern is None:
+            if match_wildcard(p):
                 if not found:
                     new_last = node.cases[i]
                     found = True
@@ -428,13 +434,14 @@ def fix(node, parents):
         if new_last:
             node.cases.append(new_last)
 
+    #@lambda f:lambda pattern:set(f(pattern))
     def names(pattern):
         for n in ast.walk(pattern):
-            if isinstance(n, ast.MatchAs):
-                if n.name:
+            if isinstance(n, ast.MatchAs) and  n.name:
                     yield n.name
-            if isinstance(n, ast.MatchMapping):
-                if n.rest:
+            if isinstance(n, ast.MatchStar) and n.name:
+                    yield n.name
+            if isinstance(n, ast.MatchMapping) and n.rest:
                     yield n.rest
 
     class RemoveName(ast.NodeVisitor):
@@ -449,29 +456,44 @@ def fix(node, parents):
             if self.condition(node.rest):
                 node.rest = None
 
-    class FixPatternNames(ast.NodeVisitor):
+    class FixPatternNames(ast.NodeTransformer):
         def __init__(self, used=None, allowed=None):
+            # variables which are already used
             self.used = set() if used is None else used
+            # variables which are allowed in a MatchOr
             self.allowed = allowed
 
-        def condition(self, name):
-            return name not in self.used and (
+        def is_allowed(self, name):
+            return name is None or name not in self.used and (
                 name in self.allowed if self.allowed is not None else True
             )
 
         def visit_MatchAs(self, node):
-            if self.condition(node.name):
-                node.name = None
-            else:
+            #print("visit",ast.dump(node))
+            #print(self.used,self.allowed)
+            if not self.is_allowed(node.name):
+                #print("set None")
+                return ast.Constant(value=None)
+            elif node.name is not None:
                 self.used.add(node.name)
-            self.generic_visit(node)
+            return self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            #print("visit",ast.dump(node))
+            #print(self.used,self.allowed)
+            if not self.is_allowed(node.name):
+                #print("set None")
+                return ast.Constant(value=None)
+            elif node.name is not None:
+                self.used.add(node.name)
+            return self.generic_visit(node)
 
         def visit_MatchMapping(self, node):
-            if self.condition(node.rest):
-                node.rest = None
-            else:
+            if not self.is_allowed(node.rest):
+                return ast.Constant(value=None)
+            elif node.rest is not None:
                 self.used.add(node.rest)
-            self.generic_visit(node)
+            return self.generic_visit(node)
 
         def visit_MatchOr(self, node: ast.MatchOr):
             allowed = set.intersection(
@@ -479,13 +501,20 @@ def fix(node, parents):
             )
             allowed -= self.used
 
-            for child in node.patterns:
-                FixPatternNames(self.used, allowed).visit(child)
+
+            #print()
+            #print(ast.unparse(node))
+            #print(ast.dump(node,indent=2))
+            #print(self.used,allowed)
+
+            node.patterns=[FixPatternNames(set(self.used), allowed).visit(child) for child in node.patterns]
 
             self.used |= allowed
+            
+            return node
 
     if isinstance(node, ast.match_case):
-        FixPatternNames().visit(node.pattern)
+        node.pattern=FixPatternNames().visit(node.pattern)
 
     if isinstance(node, ast.MatchMapping):
         node.keys = unique_by(node.keys, ast.literal_eval)
@@ -500,6 +529,7 @@ def fix(node, parents):
         if node.name is None:
             node.pattern = None
 
+
     if isinstance(node, ast.MatchOr):
         var_names = set.intersection(
             *[set(names(pattern)) for pattern in node.patterns]
@@ -508,7 +538,7 @@ def fix(node, parents):
         RemoveName(lambda name: name not in var_names).visit(node)
 
         for i, e in enumerate(node.patterns):
-            if isinstance(e, ast.MatchAs) and e.name == None:
+            if match_wildcard(e):
                 node.patterns = node.patterns[: i + 1]
                 break
 
@@ -602,7 +632,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 9 or self.nodes > 1000000
+        stop = depth > 12 or self.nodes > 10000000
 
         info = get_info(name)
 
@@ -679,3 +709,14 @@ class AstGenerator:
                 assert False, "unknown kind: " + info.kind
 
         assert False
+
+
+def generate(seed):
+    generator=AstGenerator(seed)
+    tree= generator.generate("Module")
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree)
+
+
+
+    

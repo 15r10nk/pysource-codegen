@@ -8,12 +8,12 @@ packages = [{include = "pysource_codegen"}]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-pytest = "^7.2.1"
 
 
 [tool.poetry.group.dev.dependencies]
 rich = "^13.3.4"
 pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
+pytest = "^7.2.1"
 
 [build-system]
 requires = ["poetry-core"]
