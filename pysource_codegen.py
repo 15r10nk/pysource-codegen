@@ -219,15 +219,7 @@ def propability(parents, child_name):
         return 0
 
     if (
-        inside(
-            (
-                "GeneratorExp",
-                "ListComp",
-                "SetComp",
-                "DictComp",
-                "DictComp",
-            )
-        )
+        inside(("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp"))
         # TODO restrict to comprehension inside ClassDef
         and inside(
             "ClassDef.body",
@@ -415,9 +407,15 @@ def fix(node, parents):
 
                 break
 
+    # pattern matching
+
     def match_wildcard(node):
         if isinstance(node, ast.MatchAs):
-            return node.pattern is None or match_wildcard(node.pattern) or node.name is None
+            return (
+                node.pattern is None
+                or match_wildcard(node.pattern)
+                or node.name is None
+            )
         if isinstance(node, ast.MatchOr):
             return any(match_wildcard(p) for p in node.patterns)
 
@@ -434,15 +432,21 @@ def fix(node, parents):
         if new_last:
             node.cases.append(new_last)
 
-    #@lambda f:lambda pattern:set(f(pattern))
-    def names(pattern):
-        for n in ast.walk(pattern):
-            if isinstance(n, ast.MatchAs) and  n.name:
-                    yield n.name
-            if isinstance(n, ast.MatchStar) and n.name:
-                    yield n.name
-            if isinstance(n, ast.MatchMapping) and n.rest:
-                    yield n.rest
+    # @lambda f:lambda pattern:set(f(pattern))
+    def names(node):
+        if isinstance(node, ast.MatchAs) and node.name:
+            yield node.name
+        elif isinstance(node, ast.MatchStar) and node.name:
+            yield node.name
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            yield node.rest
+        elif isinstance(node, ast.MatchOr):
+            yield from set.intersection(
+                *[set(names(pattern)) for pattern in node.patterns]
+            )
+        else:
+            for child in ast.iter_child_nodes(node):
+                yield from names(child)
 
     class RemoveName(ast.NodeVisitor):
         def __init__(self, condition):
@@ -464,25 +468,27 @@ def fix(node, parents):
             self.allowed = allowed
 
         def is_allowed(self, name):
-            return name is None or name not in self.used and (
-                name in self.allowed if self.allowed is not None else True
+            return (
+                name is None
+                or name not in self.used
+                and (name in self.allowed if self.allowed is not None else True)
             )
 
         def visit_MatchAs(self, node):
-            #print("visit",ast.dump(node))
-            #print(self.used,self.allowed)
+            # print("visit",ast.dump(node))
+            # print(self.used,self.allowed)
             if not self.is_allowed(node.name):
-                #print("set None")
+                # print("set None")
                 return ast.Constant(value=None)
             elif node.name is not None:
                 self.used.add(node.name)
             return self.generic_visit(node)
 
         def visit_MatchStar(self, node):
-            #print("visit",ast.dump(node))
-            #print(self.used,self.allowed)
+            # print("visit",ast.dump(node))
+            # print(self.used,self.allowed)
             if not self.is_allowed(node.name):
-                #print("set None")
+                # print("set None")
                 return ast.Constant(value=None)
             elif node.name is not None:
                 self.used.add(node.name)
@@ -501,20 +507,24 @@ def fix(node, parents):
             )
             allowed -= self.used
 
+            if 1:
+                print()
+                print(ast.unparse(node))
+                print(ast.dump(node, indent=2))
+                print("used:", self.used)
+                print("allowed:", allowed)
 
-            #print()
-            #print(ast.unparse(node))
-            #print(ast.dump(node,indent=2))
-            #print(self.used,allowed)
-
-            node.patterns=[FixPatternNames(set(self.used), allowed).visit(child) for child in node.patterns]
+            node.patterns = [
+                FixPatternNames(set(self.used), allowed).visit(child)
+                for child in node.patterns
+            ]
 
             self.used |= allowed
-            
+
             return node
 
     if isinstance(node, ast.match_case):
-        node.pattern=FixPatternNames().visit(node.pattern)
+        node.pattern = FixPatternNames().visit(node.pattern)
 
     if isinstance(node, ast.MatchMapping):
         node.keys = unique_by(node.keys, ast.literal_eval)
@@ -528,7 +538,6 @@ def fix(node, parents):
     if isinstance(node, ast.MatchAs):
         if node.name is None:
             node.pattern = None
-
 
     if isinstance(node, ast.MatchOr):
         var_names = set.intersection(
@@ -573,6 +582,8 @@ def fix(node, parents):
         for pattern in [*node.patterns, *node.kwd_patterns]:
             RemoveName(lambda name: name in seen).visit(pattern)
             seen |= {*names(pattern)}
+
+    # async nodes
 
     in_async_code = False
     for parent, attr in reversed(parents):
@@ -712,11 +723,7 @@ class AstGenerator:
 
 
 def generate(seed):
-    generator=AstGenerator(seed)
-    tree= generator.generate("Module")
+    generator = AstGenerator(seed)
+    tree = generator.generate("Module")
     ast.fix_missing_locations(tree)
     return ast.unparse(tree)
-
-
-
-    
