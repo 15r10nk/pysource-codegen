@@ -1,7 +1,9 @@
 import ast
 import inspect
 import re
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass
+from typing import Dict
 
 
 @dataclass
@@ -20,7 +22,7 @@ class UnionNodeType:
     options: list
 
 
-type_infos = {}
+type_infos: Dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
 
 
 def get_info(name):
@@ -311,7 +313,7 @@ def fix(node, parents):
         if not node.handlers:
             node.orelse = []
 
-    if isinstance(node, ast.TryStar):
+    if sys.version_info >= (3, 11) and isinstance(node, ast.TryStar):
         node.handlers = [
             handler for handler in node.handlers if handler.type is not None
         ]
@@ -546,8 +548,8 @@ def fix(node, parents):
 
         RemoveName(lambda name: name not in var_names).visit(node)
 
-        for i, e in enumerate(node.patterns):
-            if match_wildcard(e):
+        for i, pattern in enumerate(node.patterns):
+            if match_wildcard(pattern):
                 node.patterns = node.patterns[: i + 1]
                 break
 
@@ -555,13 +557,13 @@ def fix(node, parents):
             return node.patterns[0]
 
     if isinstance(node, ast.Match):
-        for i, e in enumerate(node.cases):
+        for i, case in enumerate(node.cases):
             if (
-                isinstance(e.pattern, ast.MatchAs)
-                and e.pattern.name is None
-                or isinstance(e.pattern, ast.MatchOr)
-                and isinstance(e.pattern.patterns[-1], ast.MatchAs)
-                and e.pattern.patterns[-1].name is None
+                isinstance(case.pattern, ast.MatchAs)
+                and case.pattern.name is None
+                or isinstance(case.pattern, ast.MatchOr)
+                and isinstance(case.pattern.patterns[-1], ast.MatchAs)
+                and case.pattern.patterns[-1].name is None
             ):
                 node.cases = node.cases[: i + 1]
                 break

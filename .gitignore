@@ -1,3 +1,5 @@
 .hypothesis/
 poetry.lock
 __pycache__
+.python-version
+.coverage

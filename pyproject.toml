@@ -14,7 +14,15 @@ python = "^3.11"
 rich = "^13.3.4"
 pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
 pytest = "^7.2.1"
+mypy = "^1.2.0"
+coverage-enable-subprocess = "^1.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.coverage.run]
+source = ["tests","pysource_codegen"]
+parallel = true
+branch = true
+data_file = "$TOP/.coverage"
