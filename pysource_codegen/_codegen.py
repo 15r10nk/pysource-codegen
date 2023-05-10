@@ -477,20 +477,14 @@ def fix(node, parents):
             )
 
         def visit_MatchAs(self, node):
-            # print("visit",ast.dump(node))
-            # print(self.used,self.allowed)
             if not self.is_allowed(node.name):
-                # print("set None")
                 return ast.Constant(value=None)
             elif node.name is not None:
                 self.used.add(node.name)
             return self.generic_visit(node)
 
         def visit_MatchStar(self, node):
-            # print("visit",ast.dump(node))
-            # print(self.used,self.allowed)
             if not self.is_allowed(node.name):
-                # print("set None")
                 return ast.Constant(value=None)
             elif node.name is not None:
                 self.used.add(node.name)
@@ -508,13 +502,6 @@ def fix(node, parents):
                 *[set(names(pattern)) for pattern in node.patterns]
             )
             allowed -= self.used
-
-            if 1:
-                print()
-                print(ast.unparse(node))
-                print(ast.dump(node, indent=2))
-                print("used:", self.used)
-                print("allowed:", allowed)
 
             node.patterns = [
                 FixPatternNames(set(self.used), allowed).visit(child)
@@ -645,7 +632,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 12 or self.nodes > 10000000
+        stop = depth > 8 or self.nodes > 10000000
 
         info = get_info(name)
 

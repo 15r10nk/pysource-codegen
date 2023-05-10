@@ -1,1 +1,1 @@
-from ._core import generate
+from ._codegen import generate

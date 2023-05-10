@@ -6,9 +6,11 @@ authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 packages = [{include = "pysource_codegen"}]
 
+[tool.poetry.scripts]
+pysource-codegen = "pysource_codegen.__main__:run"
+
 [tool.poetry.dependencies]
 python = "^3.11"
-
 
 [tool.poetry.group.dev.dependencies]
 rich = "^13.3.4"
