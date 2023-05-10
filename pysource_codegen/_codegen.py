@@ -232,6 +232,9 @@ def propability(parents, child_name):
         # SyntaxError: assignment expression within a comprehension cannot be used in a class body
         return 0
 
+    if child_name == "Expr":
+        return 30
+
     return 1
 
 
@@ -640,6 +643,9 @@ class AstGenerator:
             ranges = {}
 
             def range_for(child, attr_name):
+                if name == "Module":
+                    return range(20, 30)
+
                 if name == "MatchClass" and attr_name == "kwd_patterns":
                     attr_name = "kwd_attrs"
 
