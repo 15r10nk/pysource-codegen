@@ -1,28 +1,23 @@
 import ast
 import inspect
+import itertools
 import re
 import sys
-from dataclasses import dataclass
 from typing import Dict
 from typing import Union
 
+from .types import BuiltinNodeType
+from .types import NodeType
+from .types import UnionNodeType
 
-@dataclass
-class NodeType:
-    fields: dict
-    ast_type: type
+if sys.version_info >= (3, 9):
+    from ast import unparse
+else:
 
-
-@dataclass
-class BuiltinNodeType:
-    kind: str
-
-
-@dataclass
-class UnionNodeType:
-    options: list
+    from astunparse import unparse  # type: ignore
 
 
+py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 
@@ -73,8 +68,12 @@ def get_info(name):
     return type_infos[name]
 
 
+if sys.version_info < (3, 9):
+    from .static_type_info import type_infos  # type: ignore
+
 get_info("Delete").fields = {"targets": ("_deleteTargets", "*")}
 type_infos["_deleteTargets"] = UnionNodeType(options=["Name", "Attribute", "Subscript"])
+
 
 import random
 
@@ -235,6 +234,24 @@ def propability(parents, child_name):
         # SyntaxError: assignment expression within a comprehension cannot be used in a class body
         return 0
 
+    if not py39plus and any(p[1] == "decorator_list" for p in parents):
+        # restricted decorators
+        # see https://peps.python.org/pep-0614/
+
+        deco_parents = list(
+            itertools.takewhile(lambda a: a[1] != "decorator_list", reversed(parents))
+        )[::-1]
+
+        def valid_deco_parents(parents):
+            # Call?,Attribute*
+            parents = list(parents)
+            if parents and parents[0] == ("Call", "func"):
+                parents.pop()
+            return all(p == ("Attribute", "value") for p in parents)
+
+        if valid_deco_parents(deco_parents) and child_name != "Name":
+            return 0
+
     if child_name == "Expr":
         return 30
 
@@ -357,7 +374,7 @@ def fix(node, parents):
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
         while True:
             try:
-                code = ast.unparse(ast.fix_missing_locations(node))
+                code = unparse(ast.fix_missing_locations(node))
                 compile(code, "<string>", "exec")
                 break
             except ValueError:
@@ -739,4 +756,10 @@ def generate(seed):
     generator = AstGenerator(seed)
     tree = generator.generate("Module")
     ast.fix_missing_locations(tree)
-    return ast.unparse(tree)
+    if 0:
+        from pathlib import Path
+
+        (Path(__file__).parent / "static_type_info.py").write_text(
+            "type_info=" + repr(type_infos)
+        )
+    return unparse(tree)
