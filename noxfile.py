@@ -5,7 +5,7 @@ import nox
 nox.options.sessions = ["clean", "test", "report", "mypy"]
 nox.options.reuse_existing_virtualenvs = True
 
-python_versions = ["3.10", "3.11"]
+python_versions = ["3.9", "3.10", "3.11"]
 
 
 @nox.session(python="python3.11")
