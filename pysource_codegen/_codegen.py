@@ -22,6 +22,8 @@ class UnionNodeType:
     options: list
 
 
+py310 = (3, 10) <= sys.version_info < (3, 11)
+
 type_infos: Dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
 
 
@@ -583,6 +585,9 @@ def fix(node, parents):
             in_async_code = True
             break
         if parent in ("FunctionDef", "Lambda", "ClassDef"):
+            break
+
+        if py310 and parent in ("ListComp", "DictComp", "SetComp", "GeneratorExp"):
             break
 
     if hasattr(node, "generators"):
