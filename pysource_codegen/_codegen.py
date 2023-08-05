@@ -17,11 +17,19 @@ else:
     from astunparse import unparse  # type: ignore
 
 
+py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 
 type_infos: Dict[str, Union[NodeType, BuiltinNodeType, UnionNodeType]] = {}
+
+
+def all_args(args):
+    if py38plus:
+        return (args.posonlyargs, args.args, args.kwonlyargs)
+    else:
+        return (args.args, args.kwonlyargs)
 
 
 def get_info(name):
@@ -35,41 +43,48 @@ def get_info(name):
         doc = doc.replace("\n", " ")
 
         if doc:
-            if m := re.fullmatch(r"(\w*)", doc):
+            m = re.fullmatch(r"(\w*)", doc)
+            if m:
                 nt = NodeType(fields={}, ast_type=getattr(ast, name))
                 name = m.group(1)
                 type_infos[name] = nt
-            elif m := re.fullmatch(r"(\w*)\((.*)\)", doc):
-                nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                name = m.group(1)
-                type_infos[name] = nt
-                for string_field in m.group(2).split(","):
-                    field_type, field_name = string_field.split()
-                    quantity = ""
-                    if (last := field_type[-1]) in "*?":
-                        quantity = last
-                        field_type = field_type[:-1]
-
-                    nt.fields[field_name] = (field_type, quantity)
-                    get_info(field_type)
-            elif doc.startswith(f"{name} = "):
-                doc = doc.split(" = ", 1)[1]
-                nt = UnionNodeType(options=[])
-                type_infos[name] = nt
-                nt.options = [d.split("(")[0] for d in doc.split(" | ")]
-                for o in nt.options:
-                    get_info(o)
-
             else:
-                assert False, "can not parse:" + doc
+                m = re.fullmatch(r"(\w*)\((.*)\)", doc)
+                if m:
+                    nt = NodeType(fields={}, ast_type=getattr(ast, name))
+                    name = m.group(1)
+                    type_infos[name] = nt
+                    for string_field in m.group(2).split(","):
+                        field_type, field_name = string_field.split()
+                        quantity = ""
+                        last = field_type[-1]
+                        if last in "*?":
+                            quantity = last
+                            field_type = field_type[:-1]
+
+                        nt.fields[field_name] = (field_type, quantity)
+                        get_info(field_type)
+                elif doc.startswith(f"{name} = "):
+                    doc = doc.split(" = ", 1)[1]
+                    nt = UnionNodeType(options=[])
+                    type_infos[name] = nt
+                    nt.options = [d.split("(")[0] for d in doc.split(" | ")]
+                    for o in nt.options:
+                        get_info(o)
+
+                else:
+                    assert False, "can not parse:" + doc
         else:
             assert False, "no doc"
 
     return type_infos[name]
 
 
-if sys.version_info < (3, 9):
+if sys.version_info < (3, 8):
+    from .static_type_info37 import type_infos  # type: ignore
+elif sys.version_info < (3, 9):
     from .static_type_info import type_infos  # type: ignore
+
 
 get_info("Delete").fields = {"targets": ("_deleteTargets", "*")}
 type_infos["_deleteTargets"] = UnionNodeType(options=["Name", "Attribute", "Subscript"])
@@ -303,7 +318,7 @@ def fix(node, parents):
     if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         # unique argument names
         seen = set()
-        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+        for args in all_args(node.args):
             for i, arg in reversed(list(enumerate(args))):
                 if arg.arg in seen:
                     del args[i]
@@ -349,7 +364,9 @@ def fix(node, parents):
         if not node.handlers:
             node.orelse = []
 
-    if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)):
+    if sys.version_info >= (3, 8) and isinstance(
+        node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+    ):
         # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
         names = {
             n.id
@@ -642,7 +659,7 @@ def fix(node, parents):
 
     if isinstance(node, ast.Lambda):
         # no annotation for lambda arguments
-        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+        for args in all_args(node.args):
             for arg in args:
                 arg.annotation = None
 

@@ -4,6 +4,10 @@ from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
 
+import sys
+
+assert sys.version_info >= (3,8)
+
 type_infos = {
     "Delete": NodeType(
         fields={"targets": ("_deleteTargets", "*")}, ast_type=ast.Delete
