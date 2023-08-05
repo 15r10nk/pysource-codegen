@@ -1,28 +1,34 @@
 import ast
 import inspect
+import itertools
 import re
 import sys
-from dataclasses import dataclass
 from typing import Dict
+from typing import Union
+
+from .types import BuiltinNodeType
+from .types import NodeType
+from .types import UnionNodeType
+
+if sys.version_info >= (3, 9):
+    from ast import unparse
+else:
+    from astunparse import unparse  # type: ignore
 
 
-@dataclass
-class NodeType:
-    fields: dict
-    ast_type: type
+py38plus = (3, 8) <= sys.version_info
+py39plus = (3, 9) <= sys.version_info
+py310plus = (3, 10) <= sys.version_info
+py311plus = (3, 11) <= sys.version_info
+
+type_infos: Dict[str, Union[NodeType, BuiltinNodeType, UnionNodeType]] = {}
 
 
-@dataclass
-class BuiltinNodeType:
-    kind: str
-
-
-@dataclass
-class UnionNodeType:
-    options: list
-
-
-type_infos: Dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
+def all_args(args):
+    if py38plus:
+        return (args.posonlyargs, args.args, args.kwonlyargs)
+    else:
+        return (args.args, args.kwonlyargs)
 
 
 def get_info(name):
@@ -36,37 +42,47 @@ def get_info(name):
         doc = doc.replace("\n", " ")
 
         if doc:
-            if m := re.fullmatch(r"(\w*)", doc):
+            m = re.fullmatch(r"(\w*)", doc)
+            if m:
                 nt = NodeType(fields={}, ast_type=getattr(ast, name))
                 name = m.group(1)
                 type_infos[name] = nt
-            elif m := re.fullmatch(r"(\w*)\((.*)\)", doc):
-                nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                name = m.group(1)
-                type_infos[name] = nt
-                for string_field in m.group(2).split(","):
-                    field_type, field_name = string_field.split()
-                    quantity = ""
-                    if (last := field_type[-1]) in "*?":
-                        quantity = last
-                        field_type = field_type[:-1]
-
-                    nt.fields[field_name] = (field_type, quantity)
-                    get_info(field_type)
-            elif doc.startswith(f"{name} = "):
-                doc = doc.split(" = ", 1)[1]
-                nt = UnionNodeType(options=[])
-                type_infos[name] = nt
-                nt.options = [d.split("(")[0] for d in doc.split(" | ")]
-                for o in nt.options:
-                    get_info(o)
-
             else:
-                assert False, "can not parse:" + doc
+                m = re.fullmatch(r"(\w*)\((.*)\)", doc)
+                if m:
+                    nt = NodeType(fields={}, ast_type=getattr(ast, name))
+                    name = m.group(1)
+                    type_infos[name] = nt
+                    for string_field in m.group(2).split(","):
+                        field_type, field_name = string_field.split()
+                        quantity = ""
+                        last = field_type[-1]
+                        if last in "*?":
+                            quantity = last
+                            field_type = field_type[:-1]
+
+                        nt.fields[field_name] = (field_type, quantity)
+                        get_info(field_type)
+                elif doc.startswith(f"{name} = "):
+                    doc = doc.split(" = ", 1)[1]
+                    nt = UnionNodeType(options=[])
+                    type_infos[name] = nt
+                    nt.options = [d.split("(")[0] for d in doc.split(" | ")]
+                    for o in nt.options:
+                        get_info(o)
+
+                else:
+                    assert False, "can not parse:" + doc
         else:
             assert False, "no doc"
 
     return type_infos[name]
+
+
+if sys.version_info < (3, 8):
+    from .static_type_info37 import type_infos  # type: ignore
+elif sys.version_info < (3, 9):
+    from .static_type_info import type_infos  # type: ignore
 
 
 get_info("Delete").fields = {"targets": ("_deleteTargets", "*")}
@@ -232,6 +248,24 @@ def propability(parents, child_name):
         # SyntaxError: assignment expression within a comprehension cannot be used in a class body
         return 0
 
+    if not py39plus and any(p[1] == "decorator_list" for p in parents):
+        # restricted decorators
+        # see https://peps.python.org/pep-0614/
+
+        deco_parents = list(
+            itertools.takewhile(lambda a: a[1] != "decorator_list", reversed(parents))
+        )[::-1]
+
+        def valid_deco_parents(parents):
+            # Call?,Attribute*
+            parents = list(parents)
+            if parents and parents[0] == ("Call", "func"):
+                parents.pop()
+            return all(p == ("Attribute", "value") for p in parents)
+
+        if valid_deco_parents(deco_parents) and child_name != "Name":
+            return 0
+
     if child_name == "Expr":
         return 30
 
@@ -240,6 +274,9 @@ def propability(parents, child_name):
 
 def fix(node, parents):
     if isinstance(node, ast.ImportFrom):
+        if not py310plus and node.level is None:
+            node.level = 0
+
         if node.module == None and (node.level == None or node.level == 0):
             node.level = 1
 
@@ -255,6 +292,8 @@ def fix(node, parents):
             node.value = "text"
 
     if isinstance(node, ast.FormattedValue):
+        if not py310plus and node.conversion is None:
+            node.conversion = 5
         node.conversion = [-1, 115, 114, 97][node.conversion % 4]
 
     if hasattr(node, "ctx"):
@@ -277,7 +316,7 @@ def fix(node, parents):
     if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         # unique argument names
         seen = set()
-        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+        for args in all_args(node.args):
             for i, arg in reversed(list(enumerate(args))):
                 if arg.arg in seen:
                     del args[i]
@@ -323,7 +362,9 @@ def fix(node, parents):
         if not node.handlers:
             node.orelse = []
 
-    if isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)):
+    if sys.version_info >= (3, 8) and isinstance(
+        node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+    ):
         # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
         names = {
             n.id
@@ -348,7 +389,7 @@ def fix(node, parents):
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
         while True:
             try:
-                code = ast.unparse(ast.fix_missing_locations(node))
+                code = unparse(ast.fix_missing_locations(node))
                 compile(code, "<string>", "exec")
                 break
             except ValueError:
@@ -413,167 +454,168 @@ def fix(node, parents):
                 break
 
     # pattern matching
+    if sys.version_info >= (3, 10):
 
-    def match_wildcard(node):
+        def match_wildcard(node):
+            if isinstance(node, ast.MatchAs):
+                return (
+                    node.pattern is None
+                    or match_wildcard(node.pattern)
+                    or node.name is None
+                )
+            if isinstance(node, ast.MatchOr):
+                return any(match_wildcard(p) for p in node.patterns)
+
+        if isinstance(node, ast.Match):
+            found = False
+            new_last = None
+            for i, case_ in reversed(list(enumerate(node.cases))):
+                p = case_.pattern
+                if match_wildcard(p):
+                    if not found:
+                        new_last = node.cases[i]
+                        found = True
+                    del node.cases[i]
+            if new_last:
+                node.cases.append(new_last)
+
+        # @lambda f:lambda pattern:set(f(pattern))
+        def names(node):
+            if isinstance(node, ast.MatchAs) and node.name:
+                yield node.name
+            elif isinstance(node, ast.MatchStar) and node.name:
+                yield node.name
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                yield node.rest
+            elif isinstance(node, ast.MatchOr):
+                yield from set.intersection(
+                    *[set(names(pattern)) for pattern in node.patterns]
+                )
+            else:
+                for child in ast.iter_child_nodes(node):
+                    yield from names(child)
+
+        class RemoveName(ast.NodeVisitor):
+            def __init__(self, condition):
+                self.condition = condition
+
+            def visit_MatchAs(self, node):
+                if self.condition(node.name):
+                    node.name = None
+
+            def visit_MatchMapping(self, node):
+                if self.condition(node.rest):
+                    node.rest = None
+
+        class FixPatternNames(ast.NodeTransformer):
+            def __init__(self, used=None, allowed=None):
+                # variables which are already used
+                self.used = set() if used is None else used
+                # variables which are allowed in a MatchOr
+                self.allowed = allowed
+
+            def is_allowed(self, name):
+                return (
+                    name is None
+                    or name not in self.used
+                    and (name in self.allowed if self.allowed is not None else True)
+                )
+
+            def visit_MatchAs(self, node):
+                if not self.is_allowed(node.name):
+                    return ast.Constant(value=None)
+                elif node.name is not None:
+                    self.used.add(node.name)
+                return self.generic_visit(node)
+
+            def visit_MatchStar(self, node):
+                if not self.is_allowed(node.name):
+                    return ast.Constant(value=None)
+                elif node.name is not None:
+                    self.used.add(node.name)
+                return self.generic_visit(node)
+
+            def visit_MatchMapping(self, node):
+                if not self.is_allowed(node.rest):
+                    return ast.Constant(value=None)
+                elif node.rest is not None:
+                    self.used.add(node.rest)
+                return self.generic_visit(node)
+
+            def visit_MatchOr(self, node: ast.MatchOr):
+                allowed = set.intersection(
+                    *[set(names(pattern)) for pattern in node.patterns]
+                )
+                allowed -= self.used
+
+                node.patterns = [
+                    FixPatternNames(set(self.used), allowed).visit(child)
+                    for child in node.patterns
+                ]
+
+                self.used |= allowed
+
+                return node
+
+        if isinstance(node, ast.match_case):
+            node.pattern = FixPatternNames().visit(node.pattern)
+
+        if isinstance(node, ast.MatchMapping):
+            node.keys = unique_by(node.keys, ast.literal_eval)
+            del node.patterns[len(node.keys) :]
+
+            seen = set()
+            for pattern in node.patterns:
+                RemoveName(lambda name: name in seen).visit(pattern)
+                seen |= {*names(pattern)}
+
         if isinstance(node, ast.MatchAs):
-            return (
-                node.pattern is None
-                or match_wildcard(node.pattern)
-                or node.name is None
-            )
+            if node.name is None:
+                node.pattern = None
+
         if isinstance(node, ast.MatchOr):
-            return any(match_wildcard(p) for p in node.patterns)
-
-    if isinstance(node, ast.Match):
-        found = False
-        new_last = None
-        for i, case_ in reversed(list(enumerate(node.cases))):
-            p = case_.pattern
-            if match_wildcard(p):
-                if not found:
-                    new_last = node.cases[i]
-                    found = True
-                del node.cases[i]
-        if new_last:
-            node.cases.append(new_last)
-
-    # @lambda f:lambda pattern:set(f(pattern))
-    def names(node):
-        if isinstance(node, ast.MatchAs) and node.name:
-            yield node.name
-        elif isinstance(node, ast.MatchStar) and node.name:
-            yield node.name
-        elif isinstance(node, ast.MatchMapping) and node.rest:
-            yield node.rest
-        elif isinstance(node, ast.MatchOr):
-            yield from set.intersection(
+            var_names = set.intersection(
                 *[set(names(pattern)) for pattern in node.patterns]
             )
-        else:
-            for child in ast.iter_child_nodes(node):
-                yield from names(child)
 
-    class RemoveName(ast.NodeVisitor):
-        def __init__(self, condition):
-            self.condition = condition
+            RemoveName(lambda name: name not in var_names).visit(node)
 
-        def visit_MatchAs(self, node):
-            if self.condition(node.name):
-                node.name = None
+            for i, pattern in enumerate(node.patterns):
+                if match_wildcard(pattern):
+                    node.patterns = node.patterns[: i + 1]
+                    break
 
-        def visit_MatchMapping(self, node):
-            if self.condition(node.rest):
-                node.rest = None
+            if len(node.patterns) == 1:
+                return node.patterns[0]
 
-    class FixPatternNames(ast.NodeTransformer):
-        def __init__(self, used=None, allowed=None):
-            # variables which are already used
-            self.used = set() if used is None else used
-            # variables which are allowed in a MatchOr
-            self.allowed = allowed
+        if isinstance(node, ast.Match):
+            for i, case in enumerate(node.cases):
+                if (
+                    isinstance(case.pattern, ast.MatchAs)
+                    and case.pattern.name is None
+                    or isinstance(case.pattern, ast.MatchOr)
+                    and isinstance(case.pattern.patterns[-1], ast.MatchAs)
+                    and case.pattern.patterns[-1].name is None
+                ):
+                    node.cases = node.cases[: i + 1]
+                    break
 
-        def is_allowed(self, name):
-            return (
-                name is None
-                or name not in self.used
-                and (name in self.allowed if self.allowed is not None else True)
-            )
+        if isinstance(node, ast.MatchSequence):
+            only_firstone(node.patterns, lambda e: isinstance(e, ast.MatchStar))
 
-        def visit_MatchAs(self, node):
-            if not self.is_allowed(node.name):
-                return ast.Constant(value=None)
-            elif node.name is not None:
-                self.used.add(node.name)
-            return self.generic_visit(node)
+            seen = set()
+            for pattern in node.patterns:
+                RemoveName(lambda name: name in seen).visit(pattern)
+                seen |= {*names(pattern)}
 
-        def visit_MatchStar(self, node):
-            if not self.is_allowed(node.name):
-                return ast.Constant(value=None)
-            elif node.name is not None:
-                self.used.add(node.name)
-            return self.generic_visit(node)
+        if isinstance(node, ast.MatchClass):
+            node.kwd_attrs = list(set(node.kwd_attrs))
+            del node.kwd_patterns[len(node.kwd_attrs) :]
 
-        def visit_MatchMapping(self, node):
-            if not self.is_allowed(node.rest):
-                return ast.Constant(value=None)
-            elif node.rest is not None:
-                self.used.add(node.rest)
-            return self.generic_visit(node)
-
-        def visit_MatchOr(self, node: ast.MatchOr):
-            allowed = set.intersection(
-                *[set(names(pattern)) for pattern in node.patterns]
-            )
-            allowed -= self.used
-
-            node.patterns = [
-                FixPatternNames(set(self.used), allowed).visit(child)
-                for child in node.patterns
-            ]
-
-            self.used |= allowed
-
-            return node
-
-    if isinstance(node, ast.match_case):
-        node.pattern = FixPatternNames().visit(node.pattern)
-
-    if isinstance(node, ast.MatchMapping):
-        node.keys = unique_by(node.keys, ast.literal_eval)
-        del node.patterns[len(node.keys) :]
-
-        seen = set()
-        for pattern in node.patterns:
-            RemoveName(lambda name: name in seen).visit(pattern)
-            seen |= {*names(pattern)}
-
-    if isinstance(node, ast.MatchAs):
-        if node.name is None:
-            node.pattern = None
-
-    if isinstance(node, ast.MatchOr):
-        var_names = set.intersection(
-            *[set(names(pattern)) for pattern in node.patterns]
-        )
-
-        RemoveName(lambda name: name not in var_names).visit(node)
-
-        for i, pattern in enumerate(node.patterns):
-            if match_wildcard(pattern):
-                node.patterns = node.patterns[: i + 1]
-                break
-
-        if len(node.patterns) == 1:
-            return node.patterns[0]
-
-    if isinstance(node, ast.Match):
-        for i, case in enumerate(node.cases):
-            if (
-                isinstance(case.pattern, ast.MatchAs)
-                and case.pattern.name is None
-                or isinstance(case.pattern, ast.MatchOr)
-                and isinstance(case.pattern.patterns[-1], ast.MatchAs)
-                and case.pattern.patterns[-1].name is None
-            ):
-                node.cases = node.cases[: i + 1]
-                break
-
-    if isinstance(node, ast.MatchSequence):
-        only_firstone(node.patterns, lambda e: isinstance(e, ast.MatchStar))
-
-        seen = set()
-        for pattern in node.patterns:
-            RemoveName(lambda name: name in seen).visit(pattern)
-            seen |= {*names(pattern)}
-
-    if isinstance(node, ast.MatchClass):
-        node.kwd_attrs = list(set(node.kwd_attrs))
-        del node.kwd_patterns[len(node.kwd_attrs) :]
-
-        seen = set()
-        for pattern in [*node.patterns, *node.kwd_patterns]:
-            RemoveName(lambda name: name in seen).visit(pattern)
-            seen |= {*names(pattern)}
+            seen = set()
+            for pattern in [*node.patterns, *node.kwd_patterns]:
+                RemoveName(lambda name: name in seen).visit(pattern)
+                seen |= {*names(pattern)}
 
     # async nodes
 
@@ -583,6 +625,14 @@ def fix(node, parents):
             in_async_code = True
             break
         if parent in ("FunctionDef", "Lambda", "ClassDef"):
+            break
+
+        if not py311plus and parent in (
+            "ListComp",
+            "DictComp",
+            "SetComp",
+            "GeneratorExp",
+        ):
             break
 
     if hasattr(node, "generators"):
@@ -607,7 +657,7 @@ def fix(node, parents):
 
     if isinstance(node, ast.Lambda):
         # no annotation for lambda arguments
-        for args in (node.args.posonlyargs, node.args.args, node.args.kwonlyargs):
+        for args in all_args(node.args):
             for arg in args:
                 arg.annotation = None
 
@@ -721,4 +771,10 @@ def generate(seed):
     generator = AstGenerator(seed)
     tree = generator.generate("Module")
     ast.fix_missing_locations(tree)
-    return ast.unparse(tree)
+    if 0:
+        from pathlib import Path
+
+        (Path(__file__).parent / "static_type_info.py").write_text(
+            "type_info=" + repr(type_infos)
+        )
+    return unparse(tree)

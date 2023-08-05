@@ -1,3 +1,8 @@
+[![pypi version](https://img.shields.io/pypi/v/pysource-codegen.svg)](https://pypi.org/project/pysource-codegen/)
+![Python Versions](https://img.shields.io/pypi/pyversions/pysource-codegen)
+![PyPI - Downloads](https://img.shields.io/pypi/dw/pysource-codegen)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/15r10nk)](https://github.com/sponsors/15r10nk)
+
 # Introduction
 
 
@@ -43,5 +48,5 @@ which can be used to fix the issue.
 
 * [ ] refactor the existing code
 * [ ] use probabilities for the ast-nodes from existing python code (use markov chains)
-* [ ] support older python versions
+* [x] support older python versions
 * [ ] allow to customize the probabilities to generate code to test specific language features

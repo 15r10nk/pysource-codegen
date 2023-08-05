@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pysource-codegen"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
@@ -10,7 +10,10 @@ packages = [{include = "pysource_codegen"}]
 pysource-codegen = "pysource_codegen.__main__:run"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.7"
+astunparse = "^1.6.3"
+typed-ast = "^1.5.5"
+typing-extensions = "^4.7.1"
 
 [tool.poetry.group.dev.dependencies]
 rich = "^13.3.4"
