@@ -1,11 +1,9 @@
 import ast
-import sys
 
 from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
 
-assert sys.version_info >= (3, 8)
 
 type_infos = {
     "Delete": NodeType(
@@ -14,7 +12,6 @@ type_infos = {
     "expr": UnionNodeType(
         options=[
             "BoolOp",
-            "NamedExpr",
             "BinOp",
             "UnaryOp",
             "Lambda",
@@ -30,9 +27,8 @@ type_infos = {
             "YieldFrom",
             "Compare",
             "Call",
-            "FormattedValue",
-            "JoinedStr",
-            "Constant",
+            # "FormattedValue",
+            # "JoinedStr",
             "Attribute",
             "Subscript",
             "Starred",
@@ -48,9 +44,6 @@ type_infos = {
     "boolop": UnionNodeType(options=["And", "Or"]),
     "And": NodeType(fields={}, ast_type=ast.And),
     "Or": NodeType(fields={}, ast_type=ast.Or),
-    "NamedExpr": NodeType(
-        fields={"target": ("expr", ""), "value": ("expr", "")}, ast_type=ast.NamedExpr
-    ),
     "BinOp": NodeType(
         fields={"left": ("expr", ""), "op": ("operator", ""), "right": ("expr", "")},
         ast_type=ast.BinOp,
@@ -98,7 +91,6 @@ type_infos = {
     ),
     "arguments": NodeType(
         fields={
-            "posonlyargs": ("arg", "*"),
             "args": ("arg", "*"),
             "vararg": ("arg", "?"),
             "kwonlyargs": ("arg", "*"),
@@ -200,10 +192,6 @@ type_infos = {
         ast_type=ast.FormattedValue,
     ),
     "JoinedStr": NodeType(fields={"values": ("expr", "*")}, ast_type=ast.JoinedStr),
-    "Constant": NodeType(
-        fields={"value": ("constant", ""), "kind": ("string", "?")},
-        ast_type=ast.Constant,
-    ),
     "constant": BuiltinNodeType(kind="constant"),
     "Attribute": NodeType(
         fields={
@@ -245,7 +233,7 @@ type_infos = {
     ),
     "_deleteTargets": UnionNodeType(options=["Name", "Attribute", "Subscript"]),
     "Module": NodeType(
-        fields={"body": ("stmt", "*"), "type_ignores": ("type_ignore", "*")},
+        fields={"body": ("stmt", "*")},
         ast_type=ast.Module,
     ),
     "stmt": UnionNodeType(
@@ -422,8 +410,4 @@ type_infos = {
     "Pass": NodeType(fields={}, ast_type=ast.Pass),
     "Break": NodeType(fields={}, ast_type=ast.Break),
     "Continue": NodeType(fields={}, ast_type=ast.Continue),
-    "type_ignore": UnionNodeType(options=["TypeIgnore"]),
-    "TypeIgnore": NodeType(
-        fields={"lineno": ("int", ""), "tag": ("string", "")}, ast_type=ast.TypeIgnore
-    ),
 }

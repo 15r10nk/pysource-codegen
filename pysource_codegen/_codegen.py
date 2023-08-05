@@ -13,7 +13,6 @@ from .types import UnionNodeType
 if sys.version_info >= (3, 9):
     from ast import unparse
 else:
-
     from astunparse import unparse  # type: ignore
 
 
@@ -293,7 +292,6 @@ def fix(node, parents):
             node.value = "text"
 
     if isinstance(node, ast.FormattedValue):
-
         if not py310plus and node.conversion is None:
             node.conversion = 5
         node.conversion = [-1, 115, 114, 97][node.conversion % 4]
