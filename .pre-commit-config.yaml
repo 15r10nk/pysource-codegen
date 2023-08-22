@@ -27,7 +27,7 @@ repos:
   hooks:
   - id: setup-cfg-fmt
 
-- repo: https://github.com/asottile/reorder_python_imports
+- repo: https://github.com/asottile/reorder-python-imports
   rev: v3.10.0
   hooks:
   - args:
@@ -48,7 +48,7 @@ repos:
     - black==23.7.0
     id: blacken-docs
   repo: https://github.com/asottile/blacken-docs
-  rev: 1.15.0
+  rev: 1.16.0
 
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
   rev: v2.10.0
