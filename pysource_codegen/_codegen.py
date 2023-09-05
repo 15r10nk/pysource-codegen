@@ -671,9 +671,11 @@ def fix(node, parents):
 
 
 class AstGenerator:
-    def __init__(self, seed=0):
+    def __init__(self, seed, node_limit, depth_limit):
         self.rand = random.Random(seed)
         self.nodes = 0
+        self.node_limit = node_limit
+        self.depth_limit = depth_limit
 
     def cnd(self):
         return self.rand.choice([True, False])
@@ -685,7 +687,7 @@ class AstGenerator:
         if depth > 100:
             exit()
 
-        stop = depth > 8 or self.nodes > 10000000
+        stop = depth > self.depth_limit or self.nodes > self.node_limit
 
         info = get_info(name)
 
@@ -767,14 +769,14 @@ class AstGenerator:
         assert False
 
 
-def generate(seed):
-    generator = AstGenerator(seed)
-    tree = generator.generate("Module")
+def generate(
+    seed: int,
+    *,
+    node_limit: int = 10000000,
+    depth_limit: int = 8,
+    root_node: str = "Module",
+) -> str:
+    generator = AstGenerator(seed, depth_limit=depth_limit, node_limit=node_limit)
+    tree = generator.generate(root_node)
     ast.fix_missing_locations(tree)
-    if 0:
-        from pathlib import Path
-
-        (Path(__file__).parent / "static_type_info.py").write_text(
-            "type_info=" + repr(type_infos)
-        )
     return unparse(tree)
