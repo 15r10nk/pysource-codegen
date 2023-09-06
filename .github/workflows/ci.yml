@@ -10,13 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
       with:
         python-version: ${{matrix.python-version}}
         architecture: x64
+        allow-prereleases: true
     - run: pip install nox==2023.4.22 nox-poetry poetry
     - run: nox --session mypy-${{matrix.python-version}}
 
@@ -24,12 +25,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.7', '3.8', '3.9', '3.10', '3.11', '3.12']
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
       with:
         python-version: ${{matrix.python-version}}
         architecture: x64
+        allow-prereleases: true
     - run: pip install nox==2023.4.22 nox-poetry poetry
     - run: nox --sessions test-${{matrix.python-version}}

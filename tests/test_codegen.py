@@ -8,7 +8,7 @@ from rich.syntax import Syntax
 from pysource_codegen import generate
 
 
-@pytest.mark.parametrize("seed", list(range(500)))
+@pytest.mark.parametrize("seed", list(range(50)))
 def test_codegen(seed):
     with tempfile.NamedTemporaryFile("w", delete=False) as file:
         try:

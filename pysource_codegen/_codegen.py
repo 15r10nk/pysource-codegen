@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import ast
 import inspect
 import itertools
 import re
 import sys
-from typing import Dict
-from typing import Union
+from copy import deepcopy
+from typing import Any
 
 from .types import BuiltinNodeType
 from .types import NodeType
@@ -15,13 +17,17 @@ if sys.version_info >= (3, 9):
 else:
     from astunparse import unparse  # type: ignore
 
+from ._limits import f_string_format_limit, f_string_expr_limit
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
+py312plus = (3, 12) <= sys.version_info
 
-type_infos: Dict[str, Union[NodeType, BuiltinNodeType, UnionNodeType]] = {}
+type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
+
+before_compile_hook = lambda code: None
 
 
 def all_args(args):
@@ -127,25 +133,40 @@ def propability(parents, child_name):
         ]:
             return 0
 
-    if parents[-1] == ("FormattedValue", "value") and child_name != "Constant":
-        return 0
-
-    if parents[-1] == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
-        return 0
-
+    # f-string
     if parents[-1] == ("JoinedStr", "values") and child_name not in (
         "Constant",
         "FormattedValue",
     ):
         return 0
 
-    if child_name == "JoinedStr" and parent_types.count("JoinedStr") >= 2:
+    if (
+        not py312plus
+        and parents[-1] == ("FormattedValue", "value")
+        and child_name != "Constant"
+    ):
+        return 0
+
+    if parents[-1] == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
+        return 0
+
+    if (
+        child_name == "JoinedStr"
+        and parents.count(("FormattedValue", "format_spec")) > f_string_format_limit
+    ):
+        return 0
+
+    if (
+        child_name == "JoinedStr"
+        and parents.count(("FormattedValue", "value")) > f_string_expr_limit
+    ):
         return 0
 
     if child_name == "FormattedValue" and parents[-1][0] != "JoinedStr":
         # TODO: doc says this should be valid, maybe a bug in the python doc
         return 0
 
+    # function statements
     if child_name in (
         "Nonlocal",
         "Return",
@@ -276,6 +297,38 @@ def propability(parents, child_name):
         if valid_deco_parents(deco_parents) and child_name != "Name":
             return 0
 
+    # type alias
+    if py312plus:
+        if parents[-1] == ("TypeAlias", "name") and child_name != "Name":
+            return 0
+
+        if child_name in (
+            "NamedExpr",
+            "Yield",
+            "YieldFrom",
+            "Await",
+            "ListComp",
+            "DictComp",
+            "SetComp",
+            "GeneratorExp",
+        ) and inside(
+            (
+                "ClassDef.bases",
+                "ClassDef.keywords",
+                "FunctionDef.returns",
+                "AsyncFunctionDef.returns",
+                "arg.annotation",
+                "TypeAlias.value",
+                "TypeVar.bound",
+            )
+        ):
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            return 0
+
+        if child_name == "Await" and inside("AnnAssign.annotation"):
+            return 0
+
     if child_name == "Expr":
         return 30
 
@@ -395,73 +448,6 @@ def fix(node, parents):
                 return self.generic_visit(node)
 
         node = Transformer().visit(node)
-
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
-        while True:
-            try:
-                code = unparse(ast.fix_missing_locations(node))
-                compile(code, "<string>", "exec")
-                break
-            except ValueError:
-                break
-            except SyntaxError as e:
-                m = re.match("name '(.*)' is used prior to global declaration", str(e))
-
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is assigned to before global declaration", str(e)
-                    )
-
-                if not m:
-                    m = re.match("name '(.*)' is parameter and global", str(e))
-                if not m:
-                    m = re.match("annotated name '(.*)' can't be global", str(e))
-                if not m:
-                    m = re.match("name '(.*)' is nonlocal and global", str(e))
-
-                if m:
-                    name = m.group(1)
-
-                    class Transformer(ast.NodeTransformer):
-                        def visit_Global(self, node):
-                            if name in node.names:
-                                node.names.remove(name)
-                            if not node.names:
-                                return ast.Pass()
-                            return node
-
-                    node = Transformer().visit(node)
-                    continue
-
-                m = re.match("name '(.*)' is parameter and nonlocal", str(e))
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is used prior to nonlocal declaration", str(e)
-                    )
-                if not m:
-                    m = re.match("no binding for nonlocal '(.*)' found", str(e))
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is assigned to before nonlocal declaration", str(e)
-                    )
-                if not m:
-                    m = re.match("annotated name '(.*)' can't be nonlocal", str(e))
-
-                if m:
-                    name = m.group(1)
-
-                    class Transformer(ast.NodeTransformer):
-                        def visit_Nonlocal(self, node):
-                            if name in node.names:
-                                node.names.remove(name)
-                            if not node.names:
-                                return ast.Pass()
-                            return node
-
-                    node = Transformer().visit(node)
-                    continue
-
-                break
 
     # pattern matching
     if sys.version_info >= (3, 10):
@@ -677,6 +663,160 @@ def fix(node, parents):
         if node.args.kwarg:
             node.args.kwarg.annotation = None
 
+    if sys.version_info >= (3, 12):
+        if isinstance(node, ast.Global):
+            node.names = list(set(node.names))
+
+        # type scopes
+        if hasattr(node, "type_params"):
+            node.type_params = unique_by(node.type_params, lambda p: p.name)
+
+        def cleanup_annotation(annotation):
+            class Transformer(ast.NodeTransformer):
+                def visit_NamedExpr(self, node: ast.NamedExpr):
+                    return self.visit(node.value)
+
+                def visit_Yield(self, node: ast.Yield) -> Any:
+                    if node.value is None:
+                        return ast.Constant(value=None)
+                    return self.visit(node.value)
+
+                def visit_YieldFrom(self, node: ast.YieldFrom) -> Any:
+                    return self.visit(node.value)
+
+                def visit_Lambda(self, node: ast.Lambda) -> Any:
+                    return self.visit(node.body)
+
+            return Transformer().visit(annotation)
+
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.type_params
+        ):
+            for arg in [
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                node.args.vararg,
+                node.args.kwarg,
+            ]:
+                if arg is not None and arg.annotation:
+                    arg.annotation = cleanup_annotation(arg.annotation)
+
+            if node.returns is not None:
+                node.returns = cleanup_annotation(node.returns)
+
+        if isinstance(node, ast.ClassDef) and node.type_params:
+            node.bases = [cleanup_annotation(b) for b in node.bases]
+            for kw in node.keywords:
+                kw.value = cleanup_annotation(kw.value)
+
+            for n in ast.walk(node):
+                if isinstance(n, ast.TypeAlias):
+                    n.value = cleanup_annotation(n.value)
+
+        if isinstance(node, ast.ClassDef):
+            for n in ast.walk(node):
+                if isinstance(n, ast.TypeVar) and n.bound is not None:
+                    n.bound = cleanup_annotation(n.bound)
+
+        if isinstance(node, ast.AnnAssign):
+            node.annotation = cleanup_annotation(node.annotation)
+
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+        while True:
+            try:
+                if hasattr(node, "args"):
+                    tmp_node = deepcopy(node)
+
+                    tmp_node.args.posonlyargs = []
+                    tmp_node.args.args = []
+                    tmp_node.args.vararg = None
+                    tmp_node.args.kwonlyargs = []
+                    tmp_node.args.kwarg = None
+                    if 0:
+                        tmp_node.args.defaults = []
+                        tmp_node.args.kw_defaults = []
+
+                    tmp_node.decorator_list = []
+                    tmp_node.returns = None
+                else:
+                    tmp_node = node
+
+                code = unparse(ast.fix_missing_locations(tmp_node))
+
+                before_compile_hook(code)
+
+                # code="async def foo():\n"+textwrap.indent(code,"    ")
+
+                compile(code, "<string>", "exec", dont_inherit=True)
+                break
+            except ValueError:
+                break
+            except SyntaxError as e:
+                # invalid global
+                m = re.match("name '(.*)' is used prior to global declaration", str(e))
+
+                if not m:
+                    m = re.match(
+                        "name '(.*)' is assigned to before global declaration", str(e)
+                    )
+
+                if not m:
+                    m = re.match("name '(.*)' is parameter and global", str(e))
+                if not m:
+                    m = re.match("annotated name '(.*)' can't be global", str(e))
+                if not m:
+                    m = re.match("name '(.*)' is nonlocal and global", str(e))
+
+                if m:
+                    name = m.group(1)
+
+                    class Transformer(ast.NodeTransformer):
+                        def visit_Global(self, node):
+                            node.names = [n for n in node.names if n != name]
+                            if not node.names:
+                                return ast.Pass()
+                            return node
+
+                    node = Transformer().visit(node)
+                    continue
+
+                # invalid nonlocal
+                m = re.match("name '(.*)' is parameter and nonlocal", str(e))
+                if not m:
+                    m = re.match(
+                        "name '(.*)' is used prior to nonlocal declaration", str(e)
+                    )
+                if not m:
+                    m = re.match("no binding for nonlocal '(.*)' found", str(e))
+                if not m:
+                    m = re.match(
+                        "name '(.*)' is assigned to before nonlocal declaration", str(e)
+                    )
+                if not m:
+                    m = re.match("annotated name '(.*)' can't be nonlocal", str(e))
+                if not m:
+                    m = re.match(
+                        "nonlocal binding not allowed for type parameter '(.*)'", str(e)
+                    )
+
+                if m:
+                    name = m.group(1)
+
+                    class Transformer(ast.NodeTransformer):
+                        def visit_Nonlocal(self, node):
+                            if name in node.names:
+                                node.names.remove(name)
+                            if not node.names:
+                                return ast.Pass()
+                            return node
+
+                    node = Transformer().visit(node)
+                    continue
+
+                raise
+
     return node
 
 
@@ -790,3 +930,70 @@ def generate(
     tree = generator.generate(root_node)
     ast.fix_missing_locations(tree)
     return unparse(tree)
+
+
+# next algo
+
+# design targets:
+# * enumerate "all" possible ast-node combinations
+# * check if propability 0 would produce incorrect code
+#   * the algo should be able to generate every possible syntax combination for every python version.
+# * hypothesis integration
+# * do not use compile() in the implementation
+# * generation should be customizable (custom propabilities and random values)
+
+# features:
+# * node-context: function-scope async-scope type-scope class-scope ...
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class ParentRef:
+    node: PartialNode
+    attr_name: str
+    index: int
+    _context: dict
+
+    def __getattr__(self, name):
+        if name.startswith("ctx_"):
+            return getattr(node, name)
+        raise AttributeError
+
+
+# (d:=[n] | q_parent("Delete.targets")) and len(d.targets)==1
+
+
+@dataclass
+class PartialValue:
+    value: int | str | bool
+
+
+@dataclass
+class PartialNode:
+    _node_type_name: str
+    parent_ref: ParentRef | None
+    _defined_attrs: dict
+    _context: dict
+
+    def inside(self, spec) -> PartialNode | None:
+        ...
+
+    @property
+    def parent(self):
+        return self.parent_ref.node
+
+    def __getattr__(self, name):
+        if name.startswith("ctx_"):
+            return getattr(node, name)
+
+        if name not in self._defined_attrs:
+            raise RuntimeError(f"{self._node_type_name}.{name} is not defined jet")
+
+        return self._defined_attrs[name]
+
+
+def gen(node: PartialNode):
+    # parents [(node,attr_name)]
+    pass
