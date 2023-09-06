@@ -17,9 +17,8 @@ jobs:
       with:
         python-version: ${{matrix.python-version}}
         architecture: x64
-    - run: pip install nox==2019.11.9
-    - run: pip install poetry==1.2.2
-    - run: nox --session mypy
+    - run: pip install nox==2023.4.22 nox-poetry poetry
+    - run: nox --session mypy-${{matrix.python-version}}
 
   test:
     runs-on: ubuntu-latest
@@ -32,6 +31,5 @@ jobs:
       with:
         python-version: ${{matrix.python-version}}
         architecture: x64
-    - run: pip install nox==2022.11.21
-    - run: pip install poetry==1.2.2
+    - run: pip install nox==2023.4.22 nox-poetry poetry
     - run: nox --sessions test-${{matrix.python-version}}
