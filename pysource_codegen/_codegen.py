@@ -155,6 +155,16 @@ def propability(parents, child_name):
     ) and not inside(("FunctionDef.body", "AsyncFunctionDef.body"), ("ClassDef.body",)):
         return 0
 
+    if (
+        not py38plus
+        and child_name == "Continue"
+        and inside(
+            ("Try.finalbody", "TryStar.finalbody"),
+            ("FunctionDef.body", "AsyncFunctionDef.body"),
+        )
+    ):
+        return 0
+
     if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
         # TODO: find all allowed key types
         return 0
