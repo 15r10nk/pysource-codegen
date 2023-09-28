@@ -11,10 +11,10 @@ from pysource_codegen import generate
 @pytest.mark.parametrize("seed", list(range(50)))
 def test_codegen(seed):
     with tempfile.NamedTemporaryFile("w", delete=False) as file:
+        source = generate(seed)
+        file.write(source)
+        file.flush()
         try:
-            source = generate(seed)
-            file.write(source)
-            file.flush()
             compile(source, file.name, "exec")
 
         except Exception as e:
