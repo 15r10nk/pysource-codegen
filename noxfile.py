@@ -17,13 +17,21 @@ def clean(session):
 
 @session(python=python_versions)
 def mypy(session):
-    session.install(".", "mypy", "pytest", "rich")
+    session.install(".", "mypy", "pytest", "rich", "inline-snapshot")
     session.run("mypy", "pysource_codegen", "tests")
 
 
 @session(python=python_versions)
 def test(session):
-    session.install(".", "pytest", "pytest-xdist", "rich", "coverage-enable-subprocess")
+    session.install(
+        ".",
+        "pytest",
+        "pytest-xdist",
+        "rich",
+        "coverage-enable-subprocess",
+        "inline-snapshot",
+    )
+
     session.env["COVERAGE_PROCESS_START"] = str(
         Path(__file__).parent / "pyproject.toml"
     )
