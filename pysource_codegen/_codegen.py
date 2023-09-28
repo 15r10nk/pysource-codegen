@@ -5,7 +5,6 @@ import inspect
 import itertools
 import re
 import sys
-from copy import deepcopy
 from typing import Any
 
 from .types import BuiltinNodeType
@@ -26,8 +25,6 @@ py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
 
 type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
-
-before_compile_hook = lambda code: None
 
 
 def all_args(args):
@@ -331,6 +328,9 @@ def propability(parents, child_name):
 
     if child_name == "Expr":
         return 30
+
+    if child_name == "NonLocal" and parents[-1] == ("Module", "body"):
+        return 0
 
     return 1
 
@@ -723,100 +723,171 @@ def fix(node, parents):
         if isinstance(node, ast.AnnAssign):
             node.annotation = cleanup_annotation(node.annotation)
 
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
-        while True:
-            try:
-                if hasattr(node, "args"):
-                    tmp_node = deepcopy(node)
+    return node
 
-                    tmp_node.args.posonlyargs = []
-                    tmp_node.args.args = []
-                    tmp_node.args.vararg = None
-                    tmp_node.args.kwonlyargs = []
-                    tmp_node.args.kwarg = None
-                    if 0:
-                        tmp_node.args.defaults = []
-                        tmp_node.args.kw_defaults = []
 
-                    tmp_node.decorator_list = []
-                    tmp_node.returns = None
+def fix_result(node):
+    return fix_nonlocal(node)
+
+
+def arguments(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
+    args = node.args
+    l = [
+        *args.args,
+        args.vararg,
+        *args.kwonlyargs,
+        args.kwarg,
+    ]
+
+    if sys.version_info >= (3, 8):
+        l += args.posonlyargs
+
+    return [arg for arg in l if arg is not None]
+
+
+def fix_nonlocal(node):
+    class NonLocalFixer(ast.NodeTransformer):
+        def __init__(self, locals, nonlocals, globals, type_params):
+            self.locals = set(locals)
+            self.used_names = set(locals)
+            self.type_params = set(type_params)
+
+            # nonlocals from the parent function
+            self.nonlocals = set(nonlocals)
+
+            # globals from the global scope
+            self.globals = set(globals)
+
+            self.used_globals = set()
+
+        def name_assigned(self, name):
+            self.locals.add(name)
+            self.used_names.add(name)
+
+        def visit_Name(self, node: ast.Name) -> Any:
+            if isinstance(node.ctx, ast.Store):
+                self.name_assigned(node.id)
+            else:
+                self.used_names.add(node.id)
+            return node
+
+        def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
+            node.names = [
+                name
+                for name in node.names
+                if name not in self.locals
+                and name in self.nonlocals
+                and name not in self.used_names
+                and name not in self.type_params
+            ]
+            self.locals |= set(node.names)
+
+            if not node.names:
+                return ast.Pass()
+
+            return node
+
+        def visit_Global(self, node: ast.Global) -> Any:
+            node.names = [
+                name
+                for name in node.names
+                if name not in self.locals and name not in self.used_names
+            ]
+            self.locals |= set(node.names)
+
+            self.used_globals |= set(node.names)
+
+            if not node.names:
+                return ast.Pass()
+
+            return node
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
+            if (
+                isinstance(node.target, ast.Name)
+                and node.target.id in self.used_globals
+            ):
+                if node.value:
+                    return self.generic_visit(
+                        ast.Assign(targets=[node.target], value=node.value)
+                    )
                 else:
-                    tmp_node = node
+                    return ast.Pass()
+            return self.generic_visit(node)
 
-                code = unparse(ast.fix_missing_locations(tmp_node))
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+            self.name_assigned(node.name)
 
-                before_compile_hook(code)
+            for default in [
+                *node.args.defaults,
+                *node.args.kw_defaults,
+                *node.decorator_list,
+            ]:
+                if default is not None:
+                    self.visit(default)
+            return node
 
-                # code="async def foo():\n"+textwrap.indent(code,"    ")
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+            self.name_assigned(node.name)
 
-                compile(code, "<string>", "exec", dont_inherit=True)
-                break
-            except ValueError:
-                break
-            except SyntaxError as e:
-                # invalid global
-                m = re.match("name '(.*)' is used prior to global declaration", str(e))
+            for default in [
+                *node.args.defaults,
+                *node.args.kw_defaults,
+                *node.decorator_list,
+            ]:
+                if default is not None:
+                    self.visit(default)
+            return node
 
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is assigned to before global declaration", str(e)
-                    )
+        def visit_ExceptHandler(self, handler):
+            if handler.name:
+                self.name_assigned(handler.name)
+            return self.generic_visit(handler)
 
-                if not m:
-                    m = re.match("name '(.*)' is parameter and global", str(e))
-                if not m:
-                    m = re.match("annotated name '(.*)' can't be global", str(e))
-                if not m:
-                    m = re.match("name '(.*)' is nonlocal and global", str(e))
+        def visit_Lambda(self, node: ast.Lambda) -> Any:
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
+            return node
 
-                if m:
-                    name = m.group(1)
+    class FunctionTransformer(ast.NodeTransformer):
+        def __init__(self, nonlocals, globals, type_params):
+            self.nonlocals = set(nonlocals)
+            self.globals = set(globals)
+            self.type_params = type_params
 
-                    class Transformer(ast.NodeTransformer):
-                        def visit_Global(self, node):
-                            node.names = [n for n in node.names if n != name]
-                            if not node.names:
-                                return ast.Pass()
-                            return node
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+            return self.handle_function(node)
 
-                    node = Transformer().visit(node)
-                    continue
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+            return self.handle_function(node)
 
-                # invalid nonlocal
-                m = re.match("name '(.*)' is parameter and nonlocal", str(e))
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is used prior to nonlocal declaration", str(e)
-                    )
-                if not m:
-                    m = re.match("no binding for nonlocal '(.*)' found", str(e))
-                if not m:
-                    m = re.match(
-                        "name '(.*)' is assigned to before nonlocal declaration", str(e)
-                    )
-                if not m:
-                    m = re.match("annotated name '(.*)' can't be nonlocal", str(e))
-                if not m:
-                    m = re.match(
-                        "nonlocal binding not allowed for type parameter '(.*)'", str(e)
-                    )
+        def visit_Lambda(self, node: ast.Lambda) -> Any:
+            # there are no globals/nonlocals/functiondefs in lambdas
+            return node
 
-                if m:
-                    name = m.group(1)
+        def handle_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> Any:
+            args = node.args
+            names = {arg.arg for arg in arguments(node)}
 
-                    class Transformer(ast.NodeTransformer):
-                        def visit_Nonlocal(self, node):
-                            if name in node.names:
-                                node.names.remove(name)
-                            if not node.names:
-                                return ast.Pass()
-                            return node
+            type_params = set(self.type_params)
+            if sys.version_info >= (3, 12):
+                type_params |= {typ.name for typ in node.type_params}  # type: ignore
 
-                    node = Transformer().visit(node)
-                    continue
+            fixer = NonLocalFixer(names, self.nonlocals, self.globals, type_params)
+            node.body = [fixer.visit(stmt) for stmt in node.body]
 
-                raise
+            ft = FunctionTransformer(
+                fixer.locals | self.nonlocals, self.globals, type_params
+            )
+            node.body = [ft.visit(stmt) for stmt in node.body]
 
+            return node
+
+    fixer = NonLocalFixer([], [], [], [])
+    node = fixer.visit(node)
+
+    node = FunctionTransformer([], [], []).visit(node)
     return node
 
 
@@ -831,6 +902,11 @@ class AstGenerator:
         return self.rand.choice([True, False])
 
     def generate(self, name: str, parents=(), depth=0):
+        result = self.generate_impl(name, parents, depth)
+        result = fix_result(result)
+        return result
+
+    def generate_impl(self, name: str, parents=(), depth=0):
         depth += 1
         self.nodes += 1
 
@@ -866,14 +942,14 @@ class AstGenerator:
 
             def child_node(n, t, q, parents):
                 if q == "":
-                    return self.generate(t, parents, depth)
+                    return self.generate_impl(t, parents, depth)
                 elif q == "*":
                     return [
-                        self.generate(t, parents, depth)
+                        self.generate_impl(t, parents, depth)
                         for _ in range_for(parents[-1][0], n)
                     ]
                 elif q == "?":
-                    return self.generate(t, parents, depth) if self.cnd() else None
+                    return self.generate_impl(t, parents, depth) if self.cnd() else None
                 else:
                     assert False
 
@@ -898,7 +974,7 @@ class AstGenerator:
                 # TODO: better handling of `type?`
                 return None
 
-            return self.generate(
+            return self.generate_impl(
                 self.rand.choices(*zip(*options.items()))[0], parents, depth
             )
         if isinstance(info, BuiltinNodeType):
@@ -951,7 +1027,7 @@ def generate(
 
 # features:
 # * node-context: function-scope async-scope type-scope class-scope ...
-
+# * names: nonlocal global
 
 from dataclasses import dataclass
 
