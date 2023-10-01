@@ -11,7 +11,7 @@ pysource-codegen = "pysource_codegen.__main__:run"
 
 [tool.poetry.dependencies]
 python = "^3.7"
-astunparse = "^1.6.3"
+astunparse = { version =  "^1.6.3", python ="<3.9"}
 typed-ast = "^1.5.5"
 typing-extensions = "^4.7.1"
 
@@ -21,6 +21,7 @@ pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
 pytest = "^7.2.1"
 mypy = "^1.2.0"
 coverage-enable-subprocess = "^1.0"
+inline-snapshot = "^0.4.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -31,3 +32,6 @@ source = ["tests","pysource_codegen"]
 parallel = true
 branch = true
 data_file = "$TOP/.coverage"
+
+[tool.coverage.report]
+exclude_lines = ["assert False", "raise NotImplemented"]

@@ -4,9 +4,8 @@ import nox
 from nox_poetry import session
 
 nox.options.sessions = ["clean", "test", "report", "mypy"]
-nox.options.reuse_existing_virtualenvs = True
 
-python_versions = ["3.7", "3.8", "3.9", "3.10", "3.11"]
+python_versions = ["3.7", "3.8", "3.9", "3.10", "3.11", "3.12"]
 
 
 @session(python="python3.11")
@@ -18,13 +17,21 @@ def clean(session):
 
 @session(python=python_versions)
 def mypy(session):
-    session.install(".", "mypy", "pytest", "rich")
+    session.install(".", "mypy", "pytest", "rich", "inline-snapshot")
     session.run("mypy", "pysource_codegen", "tests")
 
 
 @session(python=python_versions)
 def test(session):
-    session.install(".", "pytest", "pytest-xdist", "rich", "coverage-enable-subprocess")
+    session.install(
+        ".",
+        "pytest",
+        "pytest-xdist",
+        "rich",
+        "coverage-enable-subprocess",
+        "inline-snapshot",
+    )
+
     session.env["COVERAGE_PROCESS_START"] = str(
         Path(__file__).parent / "pyproject.toml"
     )
