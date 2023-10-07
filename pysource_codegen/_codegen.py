@@ -919,6 +919,9 @@ class AstGenerator:
         assert False
 
 
+import warnings
+
+
 def generate(
     seed: int,
     *,
@@ -927,7 +930,11 @@ def generate(
     root_node: str = "Module",
 ) -> str:
     generator = AstGenerator(seed, depth_limit=depth_limit, node_limit=node_limit)
-    tree = generator.generate(root_node)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = generator.generate(root_node)
+
     ast.fix_missing_locations(tree)
     return unparse(tree)
 
