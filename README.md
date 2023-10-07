@@ -98,3 +98,4 @@ find_issue()
 * [ ] use probabilities for the ast-nodes from existing python code (use markov chains)
 * [x] support older python versions
 * [ ] allow to customize the probabilities to generate code to test specific language features
+* [ ] [hypothesis](https://hypothesis.readthedocs.io/en/latest/) support
