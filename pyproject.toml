@@ -25,16 +25,17 @@ pysource-codegen = "pysource_codegen.__main__:run"
 [tool.poetry.dependencies]
 python = ">=3.7"
 astunparse = { version =  ">=1.6.3", python ="<3.9"}
-typed-ast = ">=1.5.5"
+#typed-ast = ">=1.5.5"
 typing-extensions = ">=4.7.1"
 
 [tool.poetry.group.dev.dependencies]
-rich = ">=13.3.4"
+rich = ">=12.0.0"
 pytest-xdist = {extras = ["psutil"], version = ">=3.2.1"}
 pytest = ">=7.2.1"
 mypy = ">=1.2.0"
 coverage-enable-subprocess = ">=1.0"
 inline-snapshot = ">=0.4.0"
+pysource-minimize = ">=0.5.0"
 
 [build-system]
 requires = ["poetry-core"]

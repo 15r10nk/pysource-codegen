@@ -32,11 +32,17 @@ def test(session):
         "inline-snapshot",
     )
 
+    session.install("../pysource-minimize/")
+
     session.env["COVERAGE_PROCESS_START"] = str(
         Path(__file__).parent / "pyproject.toml"
     )
     session.env["TOP"] = str(Path(__file__).parent)
-    args = [] if session.posargs else ["-n", "auto", "-v"]
+    args = (
+        []
+        if {"--sw", "--generate-samples"} & set(session.posargs)
+        else ["-n", "auto", "-v"]
+    )
 
     session.run(
         "pytest", "-W", "ignore::SyntaxWarning", *args, "tests", *session.posargs

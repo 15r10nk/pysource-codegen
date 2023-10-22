@@ -726,8 +726,67 @@ def fix(node, parents):
     return node
 
 
+class TestableNodeTransformer(ast.NodeTransformer):
+    def __init__(self, change_request):
+        self.change_request = change_request
+
+    def generic_visit(self, node):
+        result = super().generic_visit(node)
+        if node is not result:
+            allowed = self.change_request(node, result)
+            if allowed:
+                return result
+            else:
+                return node
+        return node
+
+
 def fix_result(node):
     return fix_nonlocal(node)
+
+
+def is_valid_ast(tree) -> bool:
+    # something like
+    def is_valid(node: ast.AST, parents):
+        if (
+            isinstance(node, (ast.expr, ast.stmt))
+            and parents
+            and propability(
+                parents,
+                node.__class__.__name__,
+            )
+            == 0
+        ):
+            return False
+        if isinstance(node, (ast.AST)):
+            for field in node._fields:
+                value = getattr(node, field)
+                if isinstance(value, list):
+                    if not all(
+                        is_valid(e, parents + [(node.__class__.__name__, field)])
+                        for e in value
+                    ):
+                        return False
+                else:
+                    if not is_valid(
+                        value, parents + [(node.__class__.__name__, field)]
+                    ):
+                        return False
+        return True
+
+    return is_valid(tree, [])
+
+    ast_changed = False
+
+    def change_request(from_, to):
+        nonlocal ast_changed
+        ast_changed = True
+
+        return True
+
+    fix_result(node, mock)
+
+    return not ast_changed
 
 
 def arguments(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
@@ -998,13 +1057,13 @@ class AstGenerator:
 import warnings
 
 
-def generate(
+def generate_ast(
     seed: int,
     *,
     node_limit: int = 10000000,
     depth_limit: int = 8,
     root_node: str = "Module",
-) -> str:
+) -> ast.AST:
     generator = AstGenerator(seed, depth_limit=depth_limit, node_limit=node_limit)
 
     with warnings.catch_warnings():
@@ -1012,6 +1071,19 @@ def generate(
         tree = generator.generate(root_node)
 
     ast.fix_missing_locations(tree)
+    return tree
+
+
+def generate(
+    seed: int,
+    *,
+    node_limit: int = 10000000,
+    depth_limit: int = 8,
+    root_node: str = "Module",
+) -> str:
+    tree = generate_ast(
+        seed, node_limit=node_limit, depth_limit=depth_limit, root_node=root_node
+    )
     return unparse(tree)
 
 
