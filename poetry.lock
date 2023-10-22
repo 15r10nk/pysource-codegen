@@ -480,6 +480,23 @@ files = [
 plugins = ["importlib-metadata"]
 
 [[package]]
+name = "pysource-minimize"
+version = "0.6.0"
+description = "minimize python source code"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "pysource_minimize-0.6.0-py3-none-any.whl", hash = "sha256:c4596508c3092ed264e7c0d7f1ab0571c9e6e359b50b5d82009de8626a9f33f9"},
+    {file = "pysource_minimize-0.6.0.tar.gz", hash = "sha256:9fc1a63020c69e6b5a6d7bc5f8fc968e930a4f62d189b6acd7ea4a83fcef5125"},
+]
+
+[package.dependencies]
+asttokens = ">=2.0.8"
+astunparse = ">=1.6.3"
+click = ">=8.1.7"
+rich = ">=12.6.0"
+
+[[package]]
 name = "pytest"
 version = "7.4.3"
 description = "pytest: simple powerful testing with Python"
@@ -657,4 +674,4 @@ testing = ["big-O", "flake8 (<5)", "jaraco.functools", "jaraco.itertools", "more
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.7"
-content-hash = "adacae33e5dce40dedca8b3f1c4d1cfd143c3c83b71104e885b32f3824fb9e3b"
+content-hash = "ff7a37dcca4f79071d50efd5341cfe420b7ff2b11e7941c1849e7d3a9806e349"
