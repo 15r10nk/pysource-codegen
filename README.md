@@ -7,7 +7,7 @@
 
 
 `pysource_codegen` is able to generate random python code which can be compiled.
-The compiled code should no be executed.
+The compiled code should not be executed.
 
 This is still a very early version, but it does its job.
 It is general useful to test tools like formatters, linters or anything which operates on python code.
