@@ -49,3 +49,6 @@ data_file = "$TOP/.coverage"
 
 [tool.coverage.report]
 exclude_lines = ["assert False", "raise NotImplemented"]
+
+[tool.mypy]
+exclude="tests/.*_samples"

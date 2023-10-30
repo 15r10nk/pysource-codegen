@@ -1,6 +1,6 @@
 import ast
 import hashlib
-import random
+import sys
 import textwrap
 from pathlib import Path
 
@@ -17,6 +17,13 @@ sample_dir.mkdir(exist_ok=True)
 
 def does_compile(tree):
     try:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+                return False
+            if not isinstance(node, ast.JoinedStr) and any(
+                isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
+            ):
+                return False
         source = unparse(tree)
         compile(source, "<file>", "exec")
     except:
@@ -29,10 +36,11 @@ def does_compile(tree):
 )
 def test_invalid_ast(file):
     code = file.read_text()
+    print(code)
     globals = {}
     try:
         exec(code, globals)
-    except NameError as e:
+    except (NameError, ImportError) as e:
         pytest.skip(f"wrong python version {e}")
 
     tree = globals["tree"]
@@ -43,14 +51,17 @@ def test_invalid_ast(file):
                 pytest.skip(
                     f"wrong python version {node.__class__.__name__} is missing .{field}"
                 )
+        if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
+            pytest.skip(f"ast.Constant can not be unparsed on python3.7")
 
-    print(code)
-    assert not is_valid_ast(tree)
-    assert not does_compile(tree)
+    assert is_valid_ast(tree) == does_compile(tree)
 
 
-def generate_invalid_ast():
-    seed = random.randint(0, 10000000)
+def test_generate():
+    generate_invalid_ast(0)
+
+
+def generate_invalid_ast(seed):
     print("seed=", seed)
 
     tree = generate_ast(seed)
@@ -67,21 +78,23 @@ def generate_invalid_ast():
             "pysource-codegen thinks that the current ast produces valid python code, but this is not the case:"
         )
         info = "from ast import *\n"
-        info += f"tree = {ast.dump(new_tree,indent=2)}\n"
+        info += f"tree = {ast.dump(new_tree,**(dict(indent=2) if sys.version_info >=(3,9) else {}))}\n"
         source = ""
         try:
             source = unparse(new_tree)
             compile(source, "<file>", "exec")
         except Exception as e:
-            comment = ""
+            comment = f"version: {sys.version.split()[0]}\n\n"
             if source:
-                comment += f"Source:\n{source}\n"
-            comment += f"Error:\n    {e!r}"
+                comment += f"Source:\n{source}\n\n"
+            comment += f"\nError:\n    {e!r}"
 
-            info += "\n" + textwrap.indent(comment, "# ")
+            info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
 
             print(info)
             name = sample_dir / f"{hashlib.sha256(info.encode('utf-8')).hexdigest()}.py"
             name.write_text(info)
+            return True
         else:
             assert False
+    return False

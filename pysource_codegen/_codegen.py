@@ -5,6 +5,7 @@ import inspect
 import itertools
 import re
 import sys
+from copy import deepcopy
 from typing import Any
 
 from .types import BuiltinNodeType
@@ -32,6 +33,26 @@ def all_args(args):
         return (args.posonlyargs, args.args, args.kwonlyargs)
     else:
         return (args.args, args.kwonlyargs)
+
+
+def equal_ast(lhs, rhs):
+    if type(lhs) != type(rhs):
+        return False
+
+    elif isinstance(lhs, list):
+        if len(lhs) != len(rhs):
+            return False
+
+        return all(equal_ast(l, r) for l, r in zip(lhs, rhs))
+
+    elif isinstance(lhs, ast.AST):
+        return all(
+            equal_ast(getattr(lhs, field), getattr(rhs, field))
+            for field in lhs._fields
+            if field not in ("ctx",)
+        )
+    else:
+        return lhs == rhs
 
 
 def get_info(name):
@@ -77,7 +98,7 @@ def get_info(name):
                 else:
                     assert False, "can not parse:" + doc
         else:
-            assert False, "no doc"
+            assert False, "no doc for " + name
 
     return type_infos[name]
 
@@ -86,10 +107,6 @@ if sys.version_info < (3, 8):
     from .static_type_info37 import type_infos  # type: ignore
 elif sys.version_info < (3, 9):
     from .static_type_info import type_infos  # type: ignore
-
-
-get_info("Delete").fields = {"targets": ("_deleteTargets", "*")}
-type_infos["_deleteTargets"] = UnionNodeType(options=["Name", "Attribute", "Subscript"])
 
 
 import random
@@ -123,12 +140,15 @@ def propability(parents, child_name):
                 return False
         return False
 
-    if child_name == "Slice":
-        if parents[-1] != ("Subscript", "slice") or parents[-2:] != [
+    if child_name == "Slice" and not (
+        parents[-1] == ("Subscript", "slice")
+        or parents[-2:]
+        == [
             ("Subscript", "slice"),
             ("Tuple", "elts"),
-        ]:
-            return 0
+        ]
+    ):
+        return 0
 
     # f-string
     if parents[-1] == ("JoinedStr", "values") and child_name not in (
@@ -137,12 +157,14 @@ def propability(parents, child_name):
     ):
         return 0
 
-    if (
-        not py312plus
-        and parents[-1] == ("FormattedValue", "value")
-        and child_name != "Constant"
-    ):
-        return 0
+    if 0:
+        if (
+            not py312plus
+            and parents[-1] == ("FormattedValue", "value")
+            and child_name != "Constant"
+        ):
+            # TODO: WHY?
+            return 0
 
     if parents[-1] == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
         return 0
@@ -161,6 +183,14 @@ def propability(parents, child_name):
 
     if child_name == "FormattedValue" and parents[-1][0] != "JoinedStr":
         # TODO: doc says this should be valid, maybe a bug in the python doc
+        # see https://github.com/python/cpython/issues/111257
+        return 0
+
+    if parents[-1] == ("Delete", "targets") and child_name not in (
+        "Name",
+        "Attribute",
+        "Subscript",
+    ):
         return 0
 
     # function statements
@@ -355,9 +385,11 @@ def fix(node, parents):
             node.value = "text"
 
     if isinstance(node, ast.FormattedValue):
+        valid_conversion = (-1, 115, 114, 97)
         if not py310plus and node.conversion is None:
             node.conversion = 5
-        node.conversion = [-1, 115, 114, 97][node.conversion % 4]
+        if node.conversion not in valid_conversion:
+            node.conversion = valid_conversion[node.conversion % 4]
 
     if hasattr(node, "ctx"):
         if parents[-1] == ("Delete", "targets"):
@@ -746,10 +778,9 @@ def fix_result(node):
 
 
 def is_valid_ast(tree) -> bool:
-    # something like
     def is_valid(node: ast.AST, parents):
         if (
-            isinstance(node, (ast.expr, ast.stmt))
+            isinstance(node, (ast.AST))
             and parents
             and propability(
                 parents,
@@ -757,6 +788,7 @@ def is_valid_ast(tree) -> bool:
             )
             == 0
         ):
+            print(node, parents)
             return False
         if isinstance(node, (ast.AST)):
             for field in node._fields:
@@ -774,19 +806,68 @@ def is_valid_ast(tree) -> bool:
                         return False
         return True
 
-    return is_valid(tree, [])
+    if not is_valid(tree, []):
+        return False
 
-    ast_changed = False
+    for node in ast.walk(tree):
+        type_name = node.__class__.__name__
+        info = get_info(type_name)
 
-    def change_request(from_, to):
-        nonlocal ast_changed
-        ast_changed = True
+        for attr_name, value in ast.iter_fields(node):
+            if isinstance(value, list) and len(value) < min_attr_length(
+                type_name, attr_name
+            ):
+                print("invalid arg length", type_name, attr_name)
+                return False
 
-        return True
+            if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
+                print("no list", value)
+                return False
+            if value is None:
+                if (
+                    info.fields[attr_name][1] != "?"
+                    and info.fields[attr_name][0] != "constant"
+                ):
+                    print("none not allowed", type_name, attr_name)
+                    return False
 
-    fix_result(node, mock)
+    tree_copy = deepcopy(tree)
 
-    return not ast_changed
+    def fix_tree(node: ast.AST, parents):
+        for field in node._fields:
+            value = getattr(node, field)
+            if isinstance(value, ast.AST):
+                setattr(
+                    node,
+                    field,
+                    fix_tree(value, parents + [(node.__class__.__name__, field)]),
+                )
+            if isinstance(value, list):
+                setattr(
+                    node,
+                    field,
+                    [
+                        fix_tree(v, parents + [(node.__class__.__name__, field)])
+                        for v in value
+                    ],
+                )
+
+        return fix(node, parents)
+
+    tree_copy = fix_tree(tree_copy, [])
+    tree_copy = fix_result(tree_copy)
+
+    result = equal_ast(tree_copy, tree)
+
+    if 1:
+        if sys.version_info >= (3, 9) and not result:
+            dump_copy = ast.dump(tree_copy, indent=2).splitlines()
+            dump = ast.dump(tree, indent=2).splitlines()
+            import difflib
+
+            print("\n".join(difflib.context_diff(dump, dump_copy, "original", "fixed")))
+
+    return result
 
 
 def arguments(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
@@ -950,6 +1031,19 @@ def fix_nonlocal(node):
     return node
 
 
+def min_attr_length(node_type, attr_name):
+    if attr_name == "body":
+        return 1
+    if node_type == "MatchOr" and attr_name == "patterns":
+        return 2
+    if node_type == "BoolOp" and attr_name == "values":
+        return 2
+    if node_type == "BinOp" and attr_name == "values":
+        return 2
+
+    return 0
+
+
 class AstGenerator:
     def __init__(self, seed, node_limit, depth_limit):
         self.rand = random.Random(seed)
@@ -990,9 +1084,8 @@ class AstGenerator:
                     attr_name = "keys"
 
                 if attr_name not in ranges:
-                    min = 1 if attr_name == "body" else 0
-                    if child == "MatchOr" and attr_name == "patterns":
-                        min = 2
+                    min = min_attr_length(child, attr_name)
+
                     max = min if stop else min + 1 if depth > 10 else min + 5
                     max = self.rand.randint(min + 1, max + 1)
                     ranges[attr_name] = range(0, max)
