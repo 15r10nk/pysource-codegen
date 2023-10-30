@@ -5,19 +5,20 @@ from ast import Load
 from ast import Module
 from ast import Name
 from ast import Pass
+from ast import Store
 from ast import TryStar
 
 tree = Module(
     body=[
         For(
-            target=Name(id="something", ctx=Load()),
-            iter=Name(id="name_2", ctx=Load()),
+            target=Name(id="name_1", ctx=Store()),
+            iter=Name(id="something", ctx=Load()),
             body=[
                 TryStar(
                     body=[Pass()],
                     handlers=[
                         ExceptHandler(
-                            type=Name(id="name_5", ctx=Load()), body=[Break()]
+                            type=Name(id="name_4", ctx=Load()), body=[Break()]
                         )
                     ],
                     orelse=[],
@@ -25,17 +26,20 @@ tree = Module(
                 )
             ],
             orelse=[],
-            type_comment="",
         )
     ],
     type_ignores=[],
 )
 
+# version: 3.12.0
+#
 # Source:
-# for something in name_2: # type:
+# for name_1 in something:
 #     try:
 #         pass
-#     except* name_5:
+#     except* name_4:
 #         break
+#
+#
 # Error:
 #     SyntaxError("'break', 'continue' and 'return' cannot appear in an except* block", ('<file>', 5, 9, None, 5, 14))
