@@ -11,7 +11,7 @@ repos:
   - id: check-json
   - id: end-of-file-fixer
   repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v4.4.0
+  rev: v4.5.0
 - hooks:
   - args:
     - --in-place
@@ -38,18 +38,18 @@ repos:
     - --py37-plus
     id: pyupgrade
   repo: https://github.com/asottile/pyupgrade
-  rev: v3.14.0
+  rev: v3.15.0
 - hooks:
   - id: black
   repo: https://github.com/psf/black
-  rev: 23.9.1
+  rev: 23.10.1
 - hooks:
   - id: blacken-docs
   repo: https://github.com/asottile/blacken-docs
   rev: 1.16.0
 
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-  rev: v2.10.0
+  rev: v2.11.0
   hooks:
   - id: pretty-format-yaml
     args: [--autofix, --indent, '2']
@@ -57,10 +57,10 @@ repos:
 - hooks:
   - id: blackdoc
   repo: https://github.com/keewis/blackdoc
-  rev: v0.3.8
+  rev: v0.3.9
 - hooks:
   - id: commitizen
     stages:
     - commit-msg
   repo: https://github.com/commitizen-tools/commitizen
-  rev: 3.10.0
+  rev: 3.12.0
