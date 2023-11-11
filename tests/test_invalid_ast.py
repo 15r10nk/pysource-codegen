@@ -15,15 +15,15 @@ sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def does_compile(tree):
+def does_compile(tree: ast.AST):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+            return False
+        if not isinstance(node, ast.JoinedStr) and any(
+            isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
+        ):
+            return False
     try:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.BoolOp) and len(node.values) < 2:
-                return False
-            if not isinstance(node, ast.JoinedStr) and any(
-                isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
-            ):
-                return False
         source = unparse(tree)
         compile(source, "<file>", "exec")
     except:
