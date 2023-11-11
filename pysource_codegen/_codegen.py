@@ -723,11 +723,8 @@ def fix(node, parents):
             break
 
     if isinstance(node, ast.Raise):
-        if use() and not in_excepthandler or not node.exc:
+        if use() and not node.exc:
             node.cause = None
-
-        if use() and not in_excepthandler and not node.exc:
-            return ast.Pass()
 
     if use() and isinstance(node, ast.Lambda):
         # no annotation for lambda arguments
