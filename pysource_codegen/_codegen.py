@@ -426,6 +426,7 @@ def fix(node, parents):
             and assign_context[-1]
             in (
                 ("Assign", "targets"),
+                ("AnnAssign", "target"),
                 ("For", "target"),
                 ("AsyncFor", "target"),
                 ("withitem", "optional_vars"),
@@ -913,7 +914,7 @@ def is_valid_ast(tree) -> bool:
             dump = ast.dump(tree, indent=2).splitlines()
             import difflib
 
-            print("\n".join(difflib.context_diff(dump, dump_copy, "original", "fixed")))
+            print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
 
     return result
 
