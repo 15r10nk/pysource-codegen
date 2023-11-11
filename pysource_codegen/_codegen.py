@@ -35,6 +35,15 @@ def all_args(args):
         return (args.args, args.kwonlyargs)
 
 
+def use():
+    """
+    this function is mocked in test_valid_source to ignore some decisions
+    which are usually made by the algo.
+    The goal is to try to generate some valid source code which would otherwise not be generated.
+    """
+    return True
+
+
 def equal_ast(lhs, rhs):
     if type(lhs) != type(rhs):
         return False
@@ -230,7 +239,9 @@ def propability(parents, child_name):
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-    if [p for p in parents if p[0] not in ("Tuple", "List", "Starred")][-1] in [
+    assign_context = [p for p in parents if p[0] not in ("Tuple", "List", "Starred")]
+
+    if assign_context and assign_context[-1] in [
         ("For", "target"),
         ("AsyncFor", "target"),
         ("AnnAssign", "target"),
@@ -367,48 +378,59 @@ def propability(parents, child_name):
 
 def fix(node, parents):
     if isinstance(node, ast.ImportFrom):
-        if not py310plus and node.level is None:
+        if use() and not py310plus and node.level is None:
             node.level = 0
 
-        if node.module == None and (node.level == None or node.level == 0):
+        if use() and node.module == None and (node.level == None or node.level == 0):
             node.level = 1
 
     if isinstance(node, ast.ExceptHandler):
-        if node.type is None:
+        if use() and node.type is None:
             node.name = None
 
     if isinstance(node, ast.Constant):
         # TODO: what is Constant.kind
         node.kind = None
-        if parents[-1][0] == "JoinedStr":
+        if use() and parents and parents[-1][0] == "JoinedStr":
             # TODO: better format string generation
             node.value = "text"
 
     if isinstance(node, ast.FormattedValue):
         valid_conversion = (-1, 115, 114, 97)
-        if not py310plus and node.conversion is None:
+        if use() and not py310plus and node.conversion is None:
             node.conversion = 5
-        if node.conversion not in valid_conversion:
+        if use() and node.conversion not in valid_conversion:
             node.conversion = valid_conversion[node.conversion % 4]
 
+    assign_context = [p for p in parents if p[0] not in ("Tuple", "List", "Starred")]
+
     if hasattr(node, "ctx"):
-        if parents[-1] == ("Delete", "targets"):
+        if use() and parents and parents[-1] == ("Delete", "targets"):
             node.ctx = ast.Del()
-        elif [p for p in parents if p[0] not in ("Tuple", "List", "Starred")][-1] in (
-            ("Assign", "targets"),
-            ("For", "target"),
-            ("AsyncFor", "target"),
-            ("withitem", "optional_vars"),
-            ("comprehension", "target"),
+        elif (
+            use()
+            and assign_context
+            and assign_context[-1]
+            in (
+                ("Assign", "targets"),
+                ("For", "target"),
+                ("AsyncFor", "target"),
+                ("withitem", "optional_vars"),
+                ("comprehension", "target"),
+            )
         ):
             node.ctx = ast.Store()
-        else:
+        elif use():
             node.ctx = ast.Load()
 
-    if isinstance(node, (ast.List, ast.Tuple)) and isinstance(node.ctx, ast.Store):
+    if (
+        use()
+        and isinstance(node, (ast.List, ast.Tuple))
+        and isinstance(node.ctx, ast.Store)
+    ):
         only_firstone(node.elts, lambda e: isinstance(e, ast.Starred))
 
-    if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
+    if use() and isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         # unique argument names
         seen = set()
         for args in all_args(node.args):
@@ -424,7 +446,7 @@ def fix(node, parents):
                     setattr(node.args, arg_name, None)
                 seen.add(arg.arg)
 
-    if isinstance(node, ast.AsyncFunctionDef):
+    if use() and isinstance(node, ast.AsyncFunctionDef):
         if any(
             isinstance(n, (ast.Yield, ast.YieldFrom))
             for b in node.body
@@ -434,7 +456,7 @@ def fix(node, parents):
                 if isinstance(n, ast.Return):
                     n.value = None
 
-    if isinstance(node, (ast.ClassDef, ast.Call)):
+    if use() and isinstance(node, (ast.ClassDef, ast.Call)):
         # unique argument names
         seen = set()
         for i, kw in reversed(list(enumerate(node.keywords))):
@@ -443,43 +465,44 @@ def fix(node, parents):
                     del node.keywords[i]
                 seen.add(kw.arg)
 
-    if isinstance(node, (ast.Try)):
+    if use() and isinstance(node, (ast.Try)):
         node.handlers[:-1] = [
             handler for handler in node.handlers[:-1] if handler.type is not None
         ]
-        if not node.handlers:
+        if use() and not node.handlers:
             node.orelse = []
 
-    if sys.version_info >= (3, 11) and isinstance(node, ast.TryStar):
+    if use() and sys.version_info >= (3, 11) and isinstance(node, ast.TryStar):
         node.handlers = [
             handler for handler in node.handlers if handler.type is not None
         ]
-        if not node.handlers:
+        if use() and not node.handlers:
             node.orelse = []
 
-    if sys.version_info >= (3, 8) and isinstance(
-        node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
-    ):
-        # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
-        names = {
-            n.id
-            for c in node.generators
-            for n in ast.walk(c.target)
-            if isinstance(n, ast.Name)
-        } | {
-            n.id
-            for c in node.generators
-            for n in ast.walk(c.iter)
-            if isinstance(n, ast.Name)
-        }
+    if sys.version_info >= (3, 8):
+        if use() and isinstance(
+            node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+        ):
+            # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
+            names = {
+                n.id
+                for c in node.generators
+                for n in ast.walk(c.target)
+                if isinstance(n, ast.Name)
+            } | {
+                n.id
+                for c in node.generators
+                for n in ast.walk(c.iter)
+                if isinstance(n, ast.Name)
+            }
 
-        class Transformer(ast.NodeTransformer):
-            def visit_NamedExpr(self, node: ast.NamedExpr):
-                if node.target.id in names:
-                    return self.visit(node.value)
-                return self.generic_visit(node)
+            class Transformer(ast.NodeTransformer):
+                def visit_NamedExpr(self, node: ast.NamedExpr):
+                    if use() and node.target.id in names:
+                        return self.visit(node.value)
+                    return self.generic_visit(node)
 
-        node = Transformer().visit(node)
+            node = Transformer().visit(node)
 
     # pattern matching
     if sys.version_info >= (3, 10):
@@ -589,6 +612,16 @@ def fix(node, parents):
             node.pattern = FixPatternNames().visit(node.pattern)
 
         if isinstance(node, ast.MatchMapping):
+
+            def can_literal_eval(node):
+                try:
+                    hash(ast.literal_eval(node))
+                except ValueError:
+                    return False
+                return True
+
+            node.keys = [k for k in node.keys if can_literal_eval(k)]
+
             node.keys = unique_by(node.keys, ast.literal_eval)
             del node.patterns[len(node.keys) :]
 
@@ -664,7 +697,7 @@ def fix(node, parents):
             break
 
     if hasattr(node, "generators"):
-        if not in_async_code:
+        if use() and not in_async_code:
             for comp in node.generators:
                 comp.is_async = 0
 
@@ -677,46 +710,54 @@ def fix(node, parents):
             break
 
     if isinstance(node, ast.Raise):
-        if not in_excepthandler or not node.exc:
+        if use() and not in_excepthandler or not node.exc:
             node.cause = None
 
-        if not in_excepthandler and not node.exc:
+        if use() and not in_excepthandler and not node.exc:
             return ast.Pass()
 
-    if isinstance(node, ast.Lambda):
+    if use() and isinstance(node, ast.Lambda):
         # no annotation for lambda arguments
         for args in all_args(node.args):
             for arg in args:
                 arg.annotation = None
 
-        if node.args.vararg:
+        if use() and node.args.vararg:
             node.args.vararg.annotation = None
 
-        if node.args.kwarg:
+        if use() and node.args.kwarg:
             node.args.kwarg.annotation = None
 
     if sys.version_info >= (3, 12):
-        if isinstance(node, ast.Global):
+        if use() and isinstance(node, ast.Global):
             node.names = list(set(node.names))
 
         # type scopes
-        if hasattr(node, "type_params"):
+        if use() and hasattr(node, "type_params"):
             node.type_params = unique_by(node.type_params, lambda p: p.name)
 
         def cleanup_annotation(annotation):
             class Transformer(ast.NodeTransformer):
                 def visit_NamedExpr(self, node: ast.NamedExpr):
+                    if not use():
+                        return self.generic_visit(node)
                     return self.visit(node.value)
 
                 def visit_Yield(self, node: ast.Yield) -> Any:
+                    if not use():
+                        return self.generic_visit(node)
                     if node.value is None:
                         return ast.Constant(value=None)
                     return self.visit(node.value)
 
                 def visit_YieldFrom(self, node: ast.YieldFrom) -> Any:
+                    if not use():
+                        return self.generic_visit(node)
                     return self.visit(node.value)
 
                 def visit_Lambda(self, node: ast.Lambda) -> Any:
+                    if not use():
+                        return self.generic_visit(node)
                     return self.visit(node.body)
 
             return Transformer().visit(annotation)
@@ -732,45 +773,31 @@ def fix(node, parents):
                 node.args.vararg,
                 node.args.kwarg,
             ]:
-                if arg is not None and arg.annotation:
+                if use() and arg is not None and arg.annotation:
                     arg.annotation = cleanup_annotation(arg.annotation)
 
-            if node.returns is not None:
+            if use() and node.returns is not None:
                 node.returns = cleanup_annotation(node.returns)
 
         if isinstance(node, ast.ClassDef) and node.type_params:
             node.bases = [cleanup_annotation(b) for b in node.bases]
             for kw in node.keywords:
-                kw.value = cleanup_annotation(kw.value)
+                if use():
+                    kw.value = cleanup_annotation(kw.value)
 
             for n in ast.walk(node):
-                if isinstance(n, ast.TypeAlias):
+                if use() and isinstance(n, ast.TypeAlias):
                     n.value = cleanup_annotation(n.value)
 
         if isinstance(node, ast.ClassDef):
             for n in ast.walk(node):
-                if isinstance(n, ast.TypeVar) and n.bound is not None:
+                if use() and isinstance(n, ast.TypeVar) and n.bound is not None:
                     n.bound = cleanup_annotation(n.bound)
 
-        if isinstance(node, ast.AnnAssign):
+        if use() and isinstance(node, ast.AnnAssign):
             node.annotation = cleanup_annotation(node.annotation)
 
     return node
-
-
-class TestableNodeTransformer(ast.NodeTransformer):
-    def __init__(self, change_request):
-        self.change_request = change_request
-
-    def generic_visit(self, node):
-        result = super().generic_visit(node)
-        if node is not result:
-            allowed = self.change_request(node, result)
-            if allowed:
-                return result
-            else:
-                return node
-        return node
 
 
 def fix_result(node):
@@ -788,7 +815,16 @@ def is_valid_ast(tree) -> bool:
             )
             == 0
         ):
-            print(node, parents)
+            print("invalid node with:")
+            print("parents:", parents)
+            print("node:", node)
+            if 0:
+                breakpoint()
+                propability(
+                    parents,
+                    node.__class__.__name__,
+                )
+
             return False
         if isinstance(node, (ast.AST)):
             for field in node._fields:
@@ -848,6 +884,8 @@ def is_valid_ast(tree) -> bool:
                     field,
                     [
                         fix_tree(v, parents + [(node.__class__.__name__, field)])
+                        if isinstance(v, ast.AST)
+                        else v
                         for v in value
                     ],
                 )
@@ -1115,7 +1153,20 @@ class AstGenerator:
             return result
 
         if isinstance(info, UnionNodeType):
-            options = {option: propability(parents, option) for option in info.options}
+            options_list = [
+                (option, propability(parents, option)) for option in info.options
+            ]
+
+            invalid_option = [
+                option for (option, prop) in options_list if prop == 0 and not use()
+            ]
+
+            assert len(invalid_option) in (0, 1), invalid_option
+
+            if len(invalid_option) == 1:
+                return self.generate_impl(invalid_option[0])
+
+            options = dict(options_list)
             if stop:
                 for final in ("Name", "MatchValue", "Pass"):
                     if options.get(final, 0) != 0:
