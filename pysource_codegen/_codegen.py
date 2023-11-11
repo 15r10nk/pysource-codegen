@@ -149,7 +149,7 @@ def propability(parents, child_name):
                 return False
         return False
 
-    if child_name in ("Store",):
+    if child_name in ("Store", "Del", "Load"):
         return 1
 
     if child_name == "Slice" and not (
@@ -198,10 +198,14 @@ def propability(parents, child_name):
         # see https://github.com/python/cpython/issues/111257
         return 0
 
-    if parents[-1] == ("Delete", "targets") and child_name not in (
+    if inside(
+        ("Delete.targets"), ("Subscript.value", "Subscript.slice", "Attribute.value")
+    ) and child_name not in (
         "Name",
         "Attribute",
         "Subscript",
+        "List",
+        "Tuple",
     ):
         return 0
 
