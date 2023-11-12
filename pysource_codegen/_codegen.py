@@ -1208,7 +1208,17 @@ class AstGenerator:
                 return self.rand.choice(["some text", ""])
             elif info.kind == "constant":
                 return self.rand.choice(
-                    [None, "some const text", "", 1, 0, True, False]
+                    [
+                        None,
+                        b"some bytes",
+                        "some const text",
+                        b"",
+                        "",
+                        self.rand.randint(-20, 20),
+                        self.rand.uniform(-20, 20),
+                        True,
+                        False,
+                    ]
                 )
 
             else:
