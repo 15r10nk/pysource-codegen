@@ -215,7 +215,9 @@ def propability(parents, child_name):
         "Return",
         "Yield",
         "YieldFrom",
-    ) and not inside(("FunctionDef.body", "AsyncFunctionDef.body"), ("ClassDef.body",)):
+    ) and not inside(
+        ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"), ("ClassDef.body",)
+    ):
         return 0
 
     if (
