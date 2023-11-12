@@ -220,7 +220,7 @@ type_infos = {
     "Subscript": NodeType(
         fields={
             "value": ("expr", ""),
-            "slice": ("expr", ""),
+            "slice": ("slice", ""),
             "ctx": ("expr_context", ""),
         },
         ast_type=ast.Subscript,
@@ -239,8 +239,17 @@ type_infos = {
     "Tuple": NodeType(
         fields={"elts": ("expr", "*"), "ctx": ("expr_context", "")}, ast_type=ast.Tuple
     ),
+    "slice": UnionNodeType(options=["Slice", "ExtSlice", "Index"]),
     "Slice": NodeType(
         fields={"lower": ("expr", "?"), "upper": ("expr", "?"), "step": ("expr", "?")},
+        ast_type=ast.Slice,
+    ),
+    "ExtSlice": NodeType(
+        fields={"dims": ("slice", "*")},
+        ast_type=ast.Slice,
+    ),
+    "Index": NodeType(
+        fields={"value": ("expr", "")},
         ast_type=ast.Slice,
     ),
     "_deleteTargets": UnionNodeType(options=["Name", "Attribute", "Subscript"]),
