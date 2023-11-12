@@ -1,13 +1,26 @@
 [tool.poetry]
 name = "pysource-codegen"
-version = "0.4.2"
+version = "0.4.3"
 description = ""
 authors = ["Your Name <you@example.com>"]
 readme = "README.md"
 packages = [{include = "pysource_codegen"}]
 
+[tool.commitizen]
+changelog_incremental = true
+major_version_zero = true
+tag_format = "v$major.$minor.$patch$prerelease"
+update_changelog_on_bump = true
+version_files = [
+  "pysource_codegen/__init__.py:version"
+]
+version_provider = "poetry"
+
 [tool.poetry.scripts]
 pysource-codegen = "pysource_codegen.__main__:run"
+
+
+
 
 [tool.poetry.dependencies]
 python = ">=3.7"
