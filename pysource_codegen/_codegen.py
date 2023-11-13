@@ -946,12 +946,16 @@ def arguments(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
 
 def fix_nonlocal(node):
     class NonLocalFixer(ast.NodeTransformer):
+        """
+        removes invalid Nonlocals from the class/function
+        """
+
         def __init__(self, locals, nonlocals, globals, type_params):
             self.locals = set(locals)
             self.used_names = set(locals)
             self.type_params = set(type_params)
 
-            # nonlocals from the parent function
+            # nonlocals from the parent scope
             self.nonlocals = set(nonlocals)
 
             # globals from the global scope
@@ -971,6 +975,12 @@ def fix_nonlocal(node):
             return node
 
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
+            # TODO: research __class__ seems to be defined in the class scope
+            # but it is also not
+            # class A:
+            #     print(locals()) # no __class__
+            #     def f():
+            #         nonlocal __class__ # is A
             node.names = [
                 name
                 for name in node.names
@@ -978,6 +988,7 @@ def fix_nonlocal(node):
                 and name in self.nonlocals
                 and name not in self.used_names
                 and name not in self.type_params
+                or name in ("__class__",)
             ]
             self.locals |= set(node.names)
 
@@ -1061,6 +1072,10 @@ def fix_nonlocal(node):
             return node
 
     class FunctionTransformer(ast.NodeTransformer):
+        """
+        - transformes a class/function
+        """
+
         def __init__(self, nonlocals, globals, type_params):
             self.nonlocals = set(nonlocals)
             self.globals = set(globals)
