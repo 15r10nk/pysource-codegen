@@ -968,7 +968,7 @@ def fix_nonlocal(node):
             self.used_names.add(name)
 
         def visit_Name(self, node: ast.Name) -> Any:
-            if isinstance(node.ctx, ast.Store):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
                 self.name_assigned(node.id)
             else:
                 self.used_names.add(node.id)
