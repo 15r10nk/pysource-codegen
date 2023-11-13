@@ -1003,7 +1003,6 @@ def fix_nonlocal(node):
                 for name in node.names
                 if name not in self.locals and name not in self.used_names
             ]
-            self.locals |= set(node.names)
 
             self.used_globals |= set(node.names)
 
