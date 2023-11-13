@@ -104,7 +104,24 @@ def generate_valid_source(seed):
 
 
 if __name__ == "__main__":
-    for file in Path(sys.argv[1]).rglob("*.py"):
+    import json
+
+    db = Path("checked_valid_source_files")
+
+    if db.exists():
+        checked = set(json.loads(db.read_text()))
+    else:
+        checked = set()
+
+    globbed_files = set(map(str, Path(sys.argv[1]).rglob("*.py")))
+
+    all_files = globbed_files - checked
+
+    if not all_files:
+        all_files = globbed_files
+        checked = set()
+
+    for file in map(Path, sorted(all_files)):
         print(file)
         try:
             code = file.read_text("utf-8")
@@ -114,3 +131,7 @@ if __name__ == "__main__":
             continue
         if minimize_if_valid(code):
             break
+
+        checked.add(str(file))
+
+    db.write_text(json.dumps(sorted(checked)))
