@@ -287,7 +287,7 @@ def propability(parents, child_name):
         return 0
 
     in_loop = inside(
-        ("For.body", "While.body"),
+        ("For.body", "While.body", "AsyncFor.body"),
         ("FunctionDef.body", "Lambda.body", "AsyncFunctionDef.body", "ClassDef.body"),
     )
 
