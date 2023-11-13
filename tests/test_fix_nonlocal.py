@@ -56,7 +56,7 @@ def check_code(src, snapshot_value):
     assert new_src == snapshot_value
 
 
-def test_global():
+def test_global_0():
     check_code(
         """
 def a(x):
@@ -70,6 +70,8 @@ def a(x):
         ),
     )
 
+
+def test_global_1():
     check_code(
         """
 def a():
@@ -85,6 +87,8 @@ def a():
         ),
     )
 
+
+def test_global_2():
     check_code(
         """
 def a():
@@ -99,6 +103,9 @@ def a():
 """
         ),
     )
+
+
+def test_global_3():
     check_code(
         """
 def a():
@@ -114,6 +121,8 @@ def a():
         ),
     )
 
+
+def test_global_4():
     check_code(
         """
 
@@ -135,6 +144,8 @@ def a():
         ),
     )
 
+
+def test_global_5():
     check_code(
         """
 def name_4():
@@ -151,7 +162,7 @@ def name_4():
     )
 
 
-def test_nonlocal():
+def test_nonlocal_0():
     check_code(
         """
 def b():
@@ -168,6 +179,8 @@ def b():
         ),
     )
 
+
+def test_nonlocal_1():
     check_code(
         """
 def b():
@@ -186,6 +199,8 @@ def b():
         ),
     )
 
+
+def test_nonlocal_2():
     check_code(
         """
 def b():
@@ -206,6 +221,8 @@ def b():
         ),
     )
 
+
+def test_nonlocal_3():
     check_code(
         """
 def b():
@@ -226,6 +243,8 @@ def b():
         ),
     )
 
+
+def test_nonlocal_4():
     check_code(
         """
 def b():
@@ -246,6 +265,8 @@ def b():
         ),
     )
 
+
+def test_nonlocal_5():
     if sys.version_info >= (3, 12):
         check_code(
             """

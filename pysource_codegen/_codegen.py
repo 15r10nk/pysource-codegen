@@ -957,6 +957,7 @@ def fix_nonlocal(node):
 
             # nonlocals from the parent scope
             self.nonlocals = set(nonlocals)
+            self.my_nonlocals = set()
 
             # globals from the global scope
             self.globals = set(globals)
@@ -990,7 +991,7 @@ def fix_nonlocal(node):
                 and name not in self.type_params
                 or name in ("__class__",)
             ]
-            self.locals |= set(node.names)
+            self.my_nonlocals |= set(node.names)
 
             if not node.names:
                 return ast.Pass()
@@ -1001,7 +1002,9 @@ def fix_nonlocal(node):
             node.names = [
                 name
                 for name in node.names
-                if name not in self.locals and name not in self.used_names
+                if name not in self.locals
+                and name not in self.used_names
+                and name not in self.my_nonlocals
             ]
 
             self.used_globals |= set(node.names)
