@@ -211,12 +211,16 @@ def propability(parents, child_name):
 
     # function statements
     if child_name in (
-        "Nonlocal",
         "Return",
         "Yield",
         "YieldFrom",
     ) and not inside(
         ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"), ("ClassDef.body",)
+    ):
+        return 0
+    # function statements
+    if child_name in ("Nonlocal",) and not inside(
+        ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body", "ClassDef.body")
     ):
         return 0
 
@@ -1034,6 +1038,17 @@ def fix_nonlocal(node):
                     self.visit(default)
             return node
 
+        def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+            for expr in [
+                *[k.value for k in node.keywords],
+                *node.bases,
+                *node.decorator_list,
+            ]:
+                if expr is not None:
+                    self.visit(expr)
+
+            return node
+
         def visit_ExceptHandler(self, handler):
             if handler.name:
                 self.name_assigned(handler.name)
@@ -1059,6 +1074,21 @@ def fix_nonlocal(node):
 
         def visit_Lambda(self, node: ast.Lambda) -> Any:
             # there are no globals/nonlocals/functiondefs in lambdas
+            return node
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+            type_params = set(self.type_params)
+            if sys.version_info >= (3, 12):
+                type_params |= {typ.name for typ in node.type_params}  # type: ignore
+
+            fixer = NonLocalFixer([], self.nonlocals, self.globals, type_params)
+            node.body = [fixer.visit(stmt) for stmt in node.body]
+
+            ft = FunctionTransformer(
+                fixer.locals | self.nonlocals, self.globals, type_params
+            )
+            node.body = [ft.visit(stmt) for stmt in node.body]
+
             return node
 
         def handle_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> Any:
