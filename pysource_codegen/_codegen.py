@@ -720,7 +720,7 @@ def fix(node, parents):
         ):
             break
 
-    if hasattr(node, "generators"):
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
         if use() and not in_async_code:
             for comp in node.generators:
                 comp.is_async = 0
