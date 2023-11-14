@@ -557,7 +557,7 @@ def fix(node, parents):
             new_last = None
             for i, case_ in reversed(list(enumerate(node.cases))):
                 p = case_.pattern
-                if match_wildcard(p):
+                if match_wildcard(p) and case_.guard is None:
                     if not found:
                         new_last = node.cases[i]
                         found = True
@@ -686,12 +686,14 @@ def fix(node, parents):
 
         if isinstance(node, ast.Match):
             for i, case in enumerate(node.cases):
+                # default match `case _:`
                 if (
                     isinstance(case.pattern, ast.MatchAs)
                     and case.pattern.name is None
                     or isinstance(case.pattern, ast.MatchOr)
                     and isinstance(case.pattern.patterns[-1], ast.MatchAs)
                     and case.pattern.patterns[-1].name is None
+                    and case.guard is None
                 ):
                     node.cases = node.cases[: i + 1]
                     break
