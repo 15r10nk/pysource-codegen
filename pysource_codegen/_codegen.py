@@ -310,8 +310,8 @@ def propability(parents, child_name):
         # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
         return 0
 
-    if inside(("MatchValue",)) and child_name not in ("Attribute", "Name", "Constant"):
-        return 0
+    # if inside(("MatchValue",)) and child_name not in ("Attribute", "Name", "Constant",):
+    #    return 0
 
     if parents[-1] == ("MatchValue", "value") and child_name == "Name":
         return 0
