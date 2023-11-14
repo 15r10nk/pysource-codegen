@@ -35,6 +35,18 @@ def all_args(args):
         return (args.args, args.kwonlyargs)
 
 
+def walk_until(node, stop=()):
+    if isinstance(node, stop):
+        return
+    yield node
+    if isinstance(node, list):
+        for e in node:
+            yield from walk_until(e, stop)
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from walk_until(child, stop)
+
+
 def use():
     """
     this function is mocked in test_valid_source to ignore some decisions
@@ -473,10 +485,9 @@ def fix(node, parents):
     if use() and isinstance(node, ast.AsyncFunctionDef):
         if any(
             isinstance(n, (ast.Yield, ast.YieldFrom))
-            for b in node.body
-            for n in ast.walk(b)
+            for n in walk_until(node.body, (ast.FunctionDef, ast.AsyncFunctionDef))
         ):
-            for n in ast.walk(node):
+            for n in walk_until(node.body, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if isinstance(n, ast.Return):
                     n.value = None
 
