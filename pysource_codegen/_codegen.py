@@ -1067,11 +1067,16 @@ def fix_nonlocal(node):
         def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
             self.name_assigned(node.name)
 
-            for default in [
+            all_nodes = [
                 *node.args.defaults,
                 *node.args.kw_defaults,
                 *node.decorator_list,
-            ]:
+            ]
+
+            if sys.version_info < (3, 12):
+                all_nodes += [arg.annotation for arg in arguments(node)]
+
+            for default in all_nodes:
                 if default is not None:
                     self.visit(default)
             return node
@@ -1079,11 +1084,16 @@ def fix_nonlocal(node):
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
             self.name_assigned(node.name)
 
-            for default in [
+            all_nodes = [
                 *node.args.defaults,
                 *node.args.kw_defaults,
                 *node.decorator_list,
-            ]:
+            ]
+
+            if sys.version_info < (3, 12):
+                all_nodes += [arg.annotation for arg in arguments(node)]
+
+            for default in all_nodes:
                 if default is not None:
                     self.visit(default)
             return node
