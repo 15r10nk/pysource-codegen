@@ -1010,6 +1010,7 @@ def fix_nonlocal(node):
             return node
 
         def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
+            self.visit(node.generators[0].iter)
             return node
 
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
