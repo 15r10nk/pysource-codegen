@@ -1009,6 +1009,9 @@ def fix_nonlocal(node):
                 self.used_names.add(node.id)
             return node
 
+        def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
+            return node
+
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
             # TODO: research __class__ seems to be defined in the class scope
             # but it is also not
