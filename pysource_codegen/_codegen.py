@@ -310,8 +310,21 @@ def propability(parents, child_name):
         # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
         return 0
 
-    # if inside(("MatchValue",)) and child_name not in ("Attribute", "Name", "Constant",):
-    #    return 0
+    if inside(("MatchValue",)) and child_name not in (
+        "Attribute",
+        "Name",
+        "Constant",
+        "UnaryOp",
+        "USub",
+    ):
+        return 0
+
+    if (
+        inside(("MatchValue",))
+        and inside(("UnaryOp",))
+        and child_name in ("Name", "UnaryOp", "Attribute")
+    ):
+        return 0
 
     if parents[-1] == ("MatchValue", "value") and child_name == "Name":
         return 0
@@ -564,6 +577,14 @@ def fix(node, parents):
                     del node.cases[i]
             if new_last:
                 node.cases.append(new_last)
+
+        if (
+            isinstance(node, ast.MatchValue)
+            and isinstance(node.value, ast.UnaryOp)
+            and isinstance(node.value.operand, ast.Constant)
+            and type(node.value.operand.value) not in (int, float)
+        ):
+            node.value = node.value.operand
 
         # @lambda f:lambda pattern:set(f(pattern))
         def names(node):
@@ -1274,8 +1295,8 @@ class AstGenerator:
                         "some const text",
                         b"",
                         "",
-                        self.rand.randint(-20, 20),
-                        self.rand.uniform(-20, 20),
+                        self.rand.randint(0, 20),
+                        self.rand.uniform(0, 20),
                         True,
                         False,
                     ]
