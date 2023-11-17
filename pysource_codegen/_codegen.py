@@ -445,6 +445,25 @@ def fix(node, parents):
         if use() and node.type is None:
             node.name = None
 
+    if (
+        sys.version_info < (3, 11)
+        and isinstance(node, ast.Tuple)
+        and parents[-1] == ("Subscript", "slice")
+    ):
+        # a[(a:b,*c)] <- not valid
+        # TODO check this
+        found = False
+        new_elts = []
+        # allow only the first Slice or Starred
+        for e in node.elts:
+            if isinstance(e, (ast.Starred, ast.Slice)):
+                if not found:
+                    new_elts.append(e)
+                    found = True
+            else:
+                new_elts.append(e)
+        node.elts = new_elts
+
     if isinstance(node, ast.Constant):
         # TODO: what is Constant.kind
         # Constant.kind can be u for unicode strings
