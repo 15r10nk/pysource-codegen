@@ -35,7 +35,7 @@ def all_args(args):
         return (args.args, args.kwonlyargs)
 
 
-def walk_until(node, stop=()):
+def walk_until(node, stop):
     if isinstance(node, stop):
         return
     yield node
@@ -45,6 +45,26 @@ def walk_until(node, stop=()):
         return
     for child in ast.iter_child_nodes(node):
         yield from walk_until(child, stop)
+
+
+def walk_function_nodes(node):
+    if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
+        for argument in arguments(node):
+            if argument.annotation:
+                yield from walk_function_nodes(argument.annotation)
+
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            for decorator in node.decorator_list:
+                yield from walk_function_nodes(decorator)
+
+        return
+    yield node
+    if isinstance(node, list):
+        for e in node:
+            yield from walk_function_nodes(e)
+        return
+    for child in ast.iter_child_nodes(node):
+        yield from walk_function_nodes(child)
 
 
 def use():
@@ -498,9 +518,9 @@ def fix(node, parents):
     if use() and isinstance(node, ast.AsyncFunctionDef):
         if any(
             isinstance(n, (ast.Yield, ast.YieldFrom))
-            for n in walk_until(node.body, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for n in walk_function_nodes(node.body)
         ):
-            for n in walk_until(node.body, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for n in walk_function_nodes(node.body):
                 if isinstance(n, ast.Return):
                     n.value = None
 
@@ -963,7 +983,9 @@ def is_valid_ast(tree) -> bool:
     return result
 
 
-def arguments(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
+def arguments(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> list[ast.arg]:
     args = node.args
     l = [
         *args.args,
