@@ -1009,6 +1009,14 @@ def fix_nonlocal(node):
                 self.used_names.add(node.id)
             return node
 
+        if sys.version_info >= (3, 10):
+
+            def visit_MatchAs(self, node: ast.MatchAs) -> Any:
+                if node.pattern:
+                    self.visit(node.pattern)
+                self.name_assigned(node.name)
+                return node
+
         def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
             self.visit(node.generators[0].iter)
             return node
