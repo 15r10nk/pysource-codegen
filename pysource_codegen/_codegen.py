@@ -1153,9 +1153,7 @@ def fix_nonlocal(node):
             fixer = NonLocalFixer([], self.nonlocals, self.globals, type_params)
             node.body = [fixer.visit(stmt) for stmt in node.body]
 
-            ft = FunctionTransformer(
-                fixer.locals | self.nonlocals, self.globals, type_params
-            )
+            ft = FunctionTransformer(self.nonlocals, self.globals, type_params)
             node.body = [ft.visit(stmt) for stmt in node.body]
 
             return node
