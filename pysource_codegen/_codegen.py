@@ -536,6 +536,11 @@ def fix(node, parents):
                 if arg.arg in seen:
                     setattr(node.args, arg_name, None)
                 seen.add(arg.arg)
+        arguments = node.args
+        # kwonlyargs and kw_defaults has to have the same size
+        min_kw_size = min(len(arguments.kwonlyargs), len(arguments.kw_defaults))
+        arguments.kwonlyargs = arguments.kwonlyargs[:min_kw_size]
+        arguments.kw_defaults = arguments.kw_defaults[:min_kw_size]
 
     if use() and isinstance(node, ast.AsyncFunctionDef):
         if any(
@@ -903,12 +908,13 @@ def fix_result(node):
 
 def is_valid_ast(tree) -> bool:
     def is_valid(node: ast.AST, parents):
+        node_type = node.__class__.__name__
         if (
             isinstance(node, (ast.AST))
             and parents
             and propability(
                 parents,
-                node.__class__.__name__,
+                node_type,
             )
             == 0
         ):
@@ -923,6 +929,12 @@ def is_valid_ast(tree) -> bool:
                 )
 
             return False
+
+        if node_type in same_length:
+            attrs = same_length[node_type]
+            if len({len(v) for k, v in ast.iter_fields(node) if k in attrs}) != 1:
+                return False
+
         if isinstance(node, (ast.AST)):
             for field in node._fields:
                 value = getattr(node, field)
@@ -1250,6 +1262,13 @@ def min_attr_length(node_type, attr_name):
     return 0
 
 
+same_length = {
+    "MatchClass": ["kwd_attrs", "kwd_patterns"],
+    "MatchMapping": ["patterns", "keys"],
+    "arguments": ["kw_defaults", "kwonlyargs"],
+}
+
+
 class AstGenerator:
     def __init__(self, seed, node_limit, depth_limit):
         self.rand = random.Random(seed)
@@ -1283,11 +1302,10 @@ class AstGenerator:
                 if name == "Module":
                     return range(20, 30)
 
-                if name == "MatchClass" and attr_name == "kwd_patterns":
-                    attr_name = "kwd_attrs"
-
-                if name == "MatchMapping" and attr_name == "patterns":
-                    attr_name = "keys"
+                if name in same_length:
+                    attrs = same_length[name]
+                    if attr_name in attrs:
+                        attr_name = attrs[0]
 
                 if attr_name not in ranges:
                     min = min_attr_length(child, attr_name)
