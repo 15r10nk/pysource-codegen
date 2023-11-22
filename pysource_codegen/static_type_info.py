@@ -39,7 +39,6 @@ type_infos = {
             "Name",
             "List",
             "Tuple",
-            "Slice",
         ]
     ),
     "BoolOp": NodeType(
@@ -246,11 +245,11 @@ type_infos = {
     ),
     "ExtSlice": NodeType(
         fields={"dims": ("slice", "*")},
-        ast_type=ast.Slice,
+        ast_type=ast.ExtSlice,
     ),
     "Index": NodeType(
         fields={"value": ("expr", "")},
-        ast_type=ast.Slice,
+        ast_type=ast.Index,
     ),
     "_deleteTargets": UnionNodeType(options=["Name", "Attribute", "Subscript"]),
     "Module": NodeType(
