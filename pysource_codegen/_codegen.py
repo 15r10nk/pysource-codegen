@@ -52,6 +52,9 @@ def walk_function_nodes(node):
         for argument in arguments(node):
             if argument.annotation:
                 yield from walk_function_nodes(argument.annotation)
+        for default in [*node.args.kw_defaults, *node.args.defaults]:
+            if default is not None:
+                yield from walk_function_nodes(default)
 
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
             for decorator in node.decorator_list:
