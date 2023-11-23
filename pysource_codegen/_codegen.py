@@ -1176,6 +1176,8 @@ def fix_nonlocal(node):
                 if expr is not None:
                     self.visit(expr)
 
+            self.name_assigned(node.name)
+
             return node
 
         def visit_ExceptHandler(self, handler):
