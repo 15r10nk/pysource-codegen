@@ -155,9 +155,7 @@ def get_info(name):
     return type_infos[name]
 
 
-if sys.version_info < (3, 8):
-    from .static_type_info37 import type_infos  # type: ignore
-elif sys.version_info < (3, 9):
+if sys.version_info < (3, 9):
     from .static_type_info import type_infos  # type: ignore
 
 
@@ -582,30 +580,29 @@ def fix(node, parents):
         if use() and not node.handlers:
             node.orelse = []
 
-    if sys.version_info >= (3, 8):
-        if use() and isinstance(
-            node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
-        ):
-            # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
-            names = {
-                n.id
-                for c in node.generators
-                for n in ast.walk(c.target)
-                if isinstance(n, ast.Name)
-            } | {
-                n.id
-                for c in node.generators
-                for n in ast.walk(c.iter)
-                if isinstance(n, ast.Name)
-            }
+    if use() and isinstance(
+        node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+    ):
+        # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
+        names = {
+            n.id
+            for c in node.generators
+            for n in ast.walk(c.target)
+            if isinstance(n, ast.Name)
+        } | {
+            n.id
+            for c in node.generators
+            for n in ast.walk(c.iter)
+            if isinstance(n, ast.Name)
+        }
 
-            class Transformer(ast.NodeTransformer):
-                def visit_NamedExpr(self, node: ast.NamedExpr):
-                    if use() and node.target.id in names:
-                        return self.visit(node.value)
-                    return self.generic_visit(node)
+        class Transformer(ast.NodeTransformer):
+            def visit_NamedExpr(self, node: ast.NamedExpr):
+                if use() and node.target.id in names:
+                    return self.visit(node.value)
+                return self.generic_visit(node)
 
-            node = Transformer().visit(node)
+        node = Transformer().visit(node)
 
     # pattern matching
     if sys.version_info >= (3, 10):
@@ -1036,8 +1033,7 @@ def arguments(
         args.kwarg,
     ]
 
-    if sys.version_info >= (3, 8):
-        l += args.posonlyargs
+    l += args.posonlyargs
 
     return [arg for arg in l if arg is not None]
 
