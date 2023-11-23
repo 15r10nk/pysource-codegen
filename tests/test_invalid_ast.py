@@ -2,6 +2,7 @@ import ast
 import hashlib
 import sys
 import textwrap
+import warnings
 from pathlib import Path
 
 import pytest
@@ -24,8 +25,10 @@ def does_compile(tree: ast.AST):
         ):
             return False
     try:
-        source = unparse(tree)
-        compile(source, "<file>", "exec")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            source = unparse(tree)
+            compile(source, "<file>", "exec")
     except:
         return False
     return True
@@ -63,12 +66,29 @@ def generate_invalid_ast(seed):
     tree = generate_ast(seed)
 
     if not does_compile(tree):
-        assert is_valid_ast(tree)
+        try:
+            assert is_valid_ast(tree)
+        except:
+            print(f"error for is_valid_ast seed={seed}")
+            raise
+
+        last_checked_tree = tree
 
         def checker(tree):
-            return not does_compile(tree) and is_valid_ast(tree)
+            nonlocal last_checked_tree
 
-        new_tree = minimize_ast(tree, checker)
+            bug_found = not does_compile(tree) and is_valid_ast(tree)
+            if bug_found:
+                last_checked_tree = tree
+
+            return bug_found
+
+        try:
+            new_tree = minimize_ast(tree, checker)
+        except:
+            print(f"error happend while minimize_ast seed={seed}")
+            ast.dump(last_checked_tree, indent=2)
+            raise
 
         print(
             "pysource-codegen thinks that the current ast produces valid python code, but this is not the case:"
@@ -86,6 +106,7 @@ def generate_invalid_ast(seed):
             comment += f"\nError:\n    {e!r}"
 
             info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
+            info += f"\n# seed = {seed}"
 
             print(info)
             name = sample_dir / f"{hashlib.sha256(info.encode('utf-8')).hexdigest()}.py"
