@@ -79,23 +79,31 @@ def use():
     return True
 
 
-def equal_ast(lhs, rhs):
+def equal_ast(lhs, rhs, dump_info=False, t="root"):
     if type(lhs) != type(rhs):
+        if dump_info:
+            print(t, lhs, "!=", rhs)
         return False
 
     elif isinstance(lhs, list):
         if len(lhs) != len(rhs):
+            if dump_info:
+                print(t, lhs, "!=", rhs)
             return False
 
-        return all(equal_ast(l, r) for l, r in zip(lhs, rhs))
+        return all(
+            equal_ast(l, r, t + f"[{i}]") for i, (l, r) in enumerate(zip(lhs, rhs))
+        )
 
     elif isinstance(lhs, ast.AST):
         return all(
-            equal_ast(getattr(lhs, field), getattr(rhs, field))
+            equal_ast(getattr(lhs, field), getattr(rhs, field), t + f".{field}")
             for field in lhs._fields
             if field not in ("ctx",)
         )
     else:
+        if dump_info and lhs != rhs:
+            print(t, lhs, "!=", rhs)
         return lhs == rhs
 
 
