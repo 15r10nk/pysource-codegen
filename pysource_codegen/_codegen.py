@@ -1144,6 +1144,7 @@ def fix_nonlocal(node):
                 *node.args.defaults,
                 *node.args.kw_defaults,
                 *node.decorator_list,
+                node.returns,
             ]
 
             if sys.version_info < (3, 12):
@@ -1161,6 +1162,7 @@ def fix_nonlocal(node):
                 *node.args.defaults,
                 *node.args.kw_defaults,
                 *node.decorator_list,
+                node.returns,
             ]
 
             if sys.version_info < (3, 12):
