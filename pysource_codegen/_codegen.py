@@ -1125,9 +1125,9 @@ def fix_nonlocal(node):
             return node
 
         def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
-            if (
-                isinstance(node.target, ast.Name)
-                and node.target.id in self.used_globals
+            if isinstance(node.target, ast.Name) and (
+                node.target.id in self.used_globals
+                or node.target.id in self.my_nonlocals
             ):
                 if node.value:
                     return self.generic_visit(
