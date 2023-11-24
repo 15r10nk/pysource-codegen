@@ -1085,6 +1085,10 @@ def fix_nonlocal(node):
             self.visit(node.generators[0].iter)
             return node
 
+        def visit_DictComp(self, node: ast.DictComp) -> Any:
+            self.visit(node.generators[0].iter)
+            return node
+
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
             # TODO: research __class__ seems to be defined in the class scope
             # but it is also not
