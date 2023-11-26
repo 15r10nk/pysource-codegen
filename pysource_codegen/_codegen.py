@@ -310,6 +310,10 @@ def propability(parents, child_name):
         if child_name in ("Starred", "List", "Tuple"):
             return 0
 
+    if inside(("AnnAssign.target",)) and child_name == "Starred":
+        # TODO this might be a cpython bug
+        return 0
+
     if parents[-1] in [("AnnAssign", "target")]:
         if child_name not in ("Name", "Attribute", "Subscript"):
             return 0
