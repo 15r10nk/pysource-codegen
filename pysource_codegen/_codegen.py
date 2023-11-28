@@ -60,6 +60,9 @@ def walk_function_nodes(node):
             for decorator in node.decorator_list:
                 yield from walk_function_nodes(decorator)
 
+            if node.returns is not None:
+                yield from walk_function_nodes(node.returns)
+
         return
     yield node
     if isinstance(node, list):
