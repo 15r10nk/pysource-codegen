@@ -100,13 +100,12 @@ def generate_invalid_ast(seed):
             source = unparse(new_tree)
             compile(source, "<file>", "exec")
         except Exception as e:
-            comment = f"version: {sys.version.split()[0]}\n\n"
+            comment = f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
             if source:
                 comment += f"Source:\n{source}\n\n"
             comment += f"\nError:\n    {e!r}"
 
             info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
-            info += f"\n# seed = {seed}"
 
             print(info)
             name = sample_dir / f"{hashlib.sha256(info.encode('utf-8')).hexdigest()}.py"

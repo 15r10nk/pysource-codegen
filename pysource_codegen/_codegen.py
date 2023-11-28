@@ -538,6 +538,8 @@ def fix(node, parents):
             for i, arg in reversed(list(enumerate(args))):
                 if arg.arg in seen:
                     del args[i]
+                    if node.args.defaults:
+                        del node.args.defaults[0]
                 seen.add(arg.arg)
 
         for arg_name in ("kwarg", "vararg"):
@@ -1273,7 +1275,27 @@ def min_attr_length(node_type, attr_name):
     if node_type == "BoolOp" and attr_name == "values":
         return 2
     if node_type == "BinOp" and attr_name == "values":
-        return 2
+        return 1
+    if node_type == "Import" and attr_name == "names":
+        return 1
+    if node_type == "ImportFrom" and attr_name == "names":
+        return 1
+    if node_type in ("With", "AsyncWith") and attr_name == "items":
+        return 1
+    if node_type in ("Try", "TryStar") and attr_name == "handlers":
+        return 1
+    if node_type == "Delete" and attr_name == "targets":
+        return 1
+    if node_type == "Match" and attr_name == "cases":
+        return 1
+    if node_type == "ExtSlice" and attr_name == "dims":
+        return 1
+    if sys.version_info < (3, 9) and node_type == "Set" and attr_name == "elts":
+        return 1
+    if node_type == "Compare" and attr_name in ("ops", "comparators"):
+        return 1
+    if attr_name == "generators":
+        return 1
 
     return 0
 
@@ -1314,21 +1336,25 @@ class AstGenerator:
         if isinstance(info, NodeType):
             ranges = {}
 
-            def range_for(child, attr_name):
+            def attr_length(child, attr_name):
                 if name == "Module":
-                    return range(20, 30)
+                    return 20
 
                 if name in same_length:
                     attrs = same_length[name]
-                    if attr_name in attrs:
-                        attr_name = attrs[0]
+                    if attr_name in attrs[1:]:
+                        return attr_length(child, attrs[0])
 
-                if attr_name not in ranges:
+                if child == "arguments" and attr_name == "defaults":
+                    min = 0
+                    max = attr_length(child, "posonlyargs") + attr_length(child, "args")
+                    ranges[attr_name] = self.rand.randint(min, max)
+
+                elif attr_name not in ranges:
                     min = min_attr_length(child, attr_name)
 
                     max = min if stop else min + 1 if depth > 10 else min + 5
-                    max = self.rand.randint(min + 1, max + 1)
-                    ranges[attr_name] = range(0, max)
+                    ranges[attr_name] = self.rand.randint(min, max)
 
                 return ranges[attr_name]
 
@@ -1338,7 +1364,7 @@ class AstGenerator:
                 elif q == "*":
                     return [
                         self.generate_impl(t, parents, depth)
-                        for _ in range_for(parents[-1][0], n)
+                        for _ in range(attr_length(parents[-1][0], n))
                     ]
                 elif q == "?":
                     return self.generate_impl(t, parents, depth) if self.cnd() else None
@@ -1413,6 +1439,15 @@ class AstGenerator:
 import warnings
 
 
+def check(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arguments):
+            assert len(node.posonlyargs) + len(node.args) >= len(
+                node.defaults
+            ), ast.dump(node, indent=2)
+            assert len(node.kwonlyargs) == len(node.kw_defaults)
+
+
 def generate_ast(
     seed: int,
     *,
@@ -1425,6 +1460,7 @@ def generate_ast(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
         tree = generator.generate(root_node)
+        check(tree)
 
     ast.fix_missing_locations(tree)
     return tree
