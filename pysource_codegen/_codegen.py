@@ -19,6 +19,8 @@ else:
 
 from ._limits import f_string_format_limit, f_string_expr_limit
 
+from ._utils import ast_dump
+
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
@@ -1022,8 +1024,8 @@ def is_valid_ast(tree) -> bool:
 
     if 1:
         if sys.version_info >= (3, 9) and not result:
-            dump_copy = ast.dump(tree_copy, indent=2).splitlines()
-            dump = ast.dump(tree, indent=2).splitlines()
+            dump_copy = ast_dump(tree_copy).splitlines()
+            dump = ast_dump(tree).splitlines()
             import difflib
 
             print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
@@ -1447,7 +1449,7 @@ def check(tree):
         if isinstance(node, ast.arguments):
             assert len(node.posonlyargs) + len(node.args) >= len(
                 node.defaults
-            ), ast.dump(node, indent=2)
+            ), ast_dump(node)
             assert len(node.kwonlyargs) == len(node.kw_defaults)
 
 
