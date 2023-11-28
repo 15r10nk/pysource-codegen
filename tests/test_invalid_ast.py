@@ -11,6 +11,7 @@ from pysource_minimize._minimize import minimize_ast
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
+from pysource_codegen._utils import ast_dump
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
@@ -87,14 +88,14 @@ def generate_invalid_ast(seed):
             new_tree = minimize_ast(tree, checker)
         except:
             print(f"error happend while minimize_ast seed={seed}")
-            ast.dump(last_checked_tree, indent=2)
+            ast_dump(last_checked_tree)
             raise
 
         print(
             "pysource-codegen thinks that the current ast produces valid python code, but this is not the case:"
         )
         info = "from ast import *\n"
-        info += f"tree = {ast.dump(new_tree,**(dict(indent=2) if sys.version_info >=(3,9) else {}))}\n"
+        info += f"tree = {ast_dump(new_tree)}\n"
         source = ""
         try:
             source = unparse(new_tree)

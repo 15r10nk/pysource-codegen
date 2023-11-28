@@ -5,6 +5,7 @@ from inline_snapshot import snapshot
 
 from pysource_codegen._codegen import fix_nonlocal
 from pysource_codegen._codegen import unparse
+from pysource_codegen._utils import ast_dump
 
 known_errors = snapshot(
     [
@@ -37,7 +38,7 @@ def check_code(src, snapshot_value):
     tree = ast.parse(src)
 
     print("original tree:")
-    print(ast.dump(tree, **(dict(indent=2) if sys.version_info >= (3, 9) else {})))
+    print(ast_dump(tree))
     print("original src:")
     print(src)
     print("error:", str(error_str))
@@ -47,7 +48,7 @@ def check_code(src, snapshot_value):
 
     print()
     print("transformed tree:")
-    print(ast.dump(tree, **(dict(indent=2) if sys.version_info >= (3, 9) else {})))
+    print(ast_dump(tree))
     print("transformed src:")
     print(new_src)
 

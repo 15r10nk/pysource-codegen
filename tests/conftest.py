@@ -2,7 +2,9 @@ import random
 import time
 from multiprocessing import get_context
 
-from .test_valid_source import generate_valid_source
+from .test_invalid_ast import generate_invalid_ast
+
+# from .test_valid_source import generate_valid_source
 
 
 def pytest_addoption(parser, pluginmanager):
@@ -14,8 +16,8 @@ def pytest_addoption(parser, pluginmanager):
 
 
 def generate(seed):
-    # return generate_invalid_ast(seed)
-    return generate_valid_source(seed)
+    return generate_invalid_ast(seed)
+    # return generate_valid_source(seed)
 
 
 def seeds():
