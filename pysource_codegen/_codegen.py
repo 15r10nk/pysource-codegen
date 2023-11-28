@@ -1216,6 +1216,26 @@ def fix_nonlocal(node):
                     self.visit(default)
             return node
 
+        if sys.version_info < (3, 13):
+
+            def visit_Try(self, node: ast.Try) -> Any:
+                # work around for https://github.com/python/cpython/issues/111123
+                args = {}
+                for k in ("body", "orelse", "handlers", "finalbody"):
+                    args[k] = [self.visit(x) for x in getattr(node, k)]
+
+                return ast.Try(**args)
+
+            if sys.version_info >= (3, 11):
+
+                def visit_TryStar(self, node: ast.TryStar) -> Any:
+                    # work around for https://github.com/python/cpython/issues/111123
+                    args = {}
+                    for k in ("body", "orelse", "handlers", "finalbody"):
+                        args[k] = [self.visit(x) for x in getattr(node, k)]
+
+                    return ast.TryStar(**args)
+
     class FunctionTransformer(ast.NodeTransformer):
         """
         - transformes a class/function
