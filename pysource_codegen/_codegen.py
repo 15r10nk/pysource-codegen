@@ -149,6 +149,9 @@ def propability(parents, child_name):
                 return False
         return False
 
+    if child_name in ("Store",):
+        return 1
+
     if child_name == "Slice" and not (
         parents[-1] == ("Subscript", "slice")
         or parents[-2:]
