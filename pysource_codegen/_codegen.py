@@ -1070,6 +1070,8 @@ def fix_nonlocal(node):
 
 
 def min_attr_length(node_type, attr_name):
+    if node_type == "Module" and attr_name == "body":
+        return 0
     if attr_name == "body":
         return 1
     if node_type == "MatchOr" and attr_name == "patterns":
