@@ -729,7 +729,7 @@ def fix(node, parents):
 
     if sys.version_info >= (3, 12):
         if use() and isinstance(node, ast.Global):
-            node.names = list(set(node.names))
+            node.names = unique_by(node.names, lambda e: e)
 
         # type scopes
         if use() and hasattr(node, "type_params"):
