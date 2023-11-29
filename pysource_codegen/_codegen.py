@@ -258,7 +258,7 @@ def propability(parents, child_name):
             return 0
 
     if parents[-1] in [("AnnAssign", "target")]:
-        if child_name != "Name":
+        if child_name not in ("Name", "Attribute"):
             return 0
 
     if parents[-1] in [("NamedExpr", "target")] and child_name != "Name":
