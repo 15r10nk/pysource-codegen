@@ -392,10 +392,21 @@ def fix(node, parents):
 
     if isinstance(node, ast.Constant):
         # TODO: what is Constant.kind
-        node.kind = None
-        if use() and parents and parents[-1][0] == "JoinedStr":
+        # Constant.kind can be u for unicode strings
+        allowed_kind: list[str | None] = [None]
+        if isinstance(node.value, str):
+            allowed_kind.append("u")
+        elif node.kind not in allowed_kind:
+            node.kind = allowed_kind[hash(node.kind) % len(allowed_kind)]
+
+        if (
+            use()
+            and parents
+            and parents[-1] == ("JoinedStr", "values")
+            and not isinstance(node.value, str)
+        ):
             # TODO: better format string generation
-            node.value = "text"
+            node.value = str(node.value)
 
     if isinstance(node, ast.FormattedValue):
         valid_conversion = (-1, 115, 114, 97)
