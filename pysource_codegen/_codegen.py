@@ -1062,11 +1062,10 @@ def fix_nonlocal(node):
 
             # nonlocals from the parent scope
             self.nonlocals = set(nonlocals)
-            self.my_nonlocals = set()
+            self.used_nonlocals = set()
 
             # globals from the global scope
             self.globals = set(globals)
-
             self.used_globals = set()
 
         def name_assigned(self, name):
@@ -1118,9 +1117,10 @@ def fix_nonlocal(node):
                 and name in self.nonlocals
                 and name not in self.used_names
                 and name not in self.type_params
+                and name not in self.used_globals
                 or name in ("__class__",)
             ]
-            self.my_nonlocals |= set(node.names)
+            self.used_nonlocals |= set(node.names)
 
             if not node.names:
                 return ast.Pass()
@@ -1133,9 +1133,8 @@ def fix_nonlocal(node):
                 for name in node.names
                 if name not in self.locals
                 and name not in self.used_names
-                and name not in self.my_nonlocals
+                and name not in self.used_nonlocals
             ]
-
             self.used_globals |= set(node.names)
 
             if not node.names:
@@ -1146,7 +1145,7 @@ def fix_nonlocal(node):
         def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
             if isinstance(node.target, ast.Name) and (
                 node.target.id in self.used_globals
-                or node.target.id in self.my_nonlocals
+                or node.target.id in self.used_nonlocals
             ):
                 if node.value:
                     return self.generic_visit(
