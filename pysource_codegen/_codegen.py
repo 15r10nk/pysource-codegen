@@ -584,13 +584,6 @@ def fix(node, parents):
         if use() and not node.handlers:
             node.orelse = []
 
-    if use() and sys.version_info >= (3, 11) and isinstance(node, ast.TryStar):
-        node.handlers = [
-            handler for handler in node.handlers if handler.type is not None
-        ]
-        if use() and not node.handlers:
-            node.orelse = []
-
     if use() and isinstance(
         node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
     ):
@@ -924,13 +917,13 @@ def fix_result(node):
 
 def is_valid_ast(tree) -> bool:
     def is_valid(node: ast.AST, parents):
-        node_type = node.__class__.__name__
+        type_name = node.__class__.__name__
         if (
             isinstance(node, (ast.AST))
             and parents
             and propability(
                 parents,
-                node_type,
+                type_name,
             )
             == 0
         ):
@@ -946,12 +939,32 @@ def is_valid_ast(tree) -> bool:
 
             return False
 
-        if node_type in same_length:
-            attrs = same_length[node_type]
+        if type_name in same_length:
+            attrs = same_length[type_name]
             if len({len(v) for k, v in ast.iter_fields(node) if k in attrs}) != 1:
                 return False
 
         if isinstance(node, (ast.AST)):
+            info = get_info(type_name)
+
+            for attr_name, value in ast.iter_fields(node):
+                if isinstance(value, list) and len(value) < min_attr_length(
+                    type_name, attr_name
+                ):
+                    print("invalid arg length", type_name, attr_name)
+                    return False
+
+                if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
+                    print("no list", value)
+                    return False
+                if value is None:
+                    if not (
+                        (info.fields[attr_name][1] == "?" and none_allowed(parents))
+                        or info.fields[attr_name][0] == "constant"
+                    ):
+                        print("none not allowed", type_name, attr_name)
+                        return False
+
             for field in node._fields:
                 value = getattr(node, field)
                 if isinstance(value, list):
@@ -969,28 +982,6 @@ def is_valid_ast(tree) -> bool:
 
     if not is_valid(tree, []):
         return False
-
-    for node in ast.walk(tree):
-        type_name = node.__class__.__name__
-        info = get_info(type_name)
-
-        for attr_name, value in ast.iter_fields(node):
-            if isinstance(value, list) and len(value) < min_attr_length(
-                type_name, attr_name
-            ):
-                print("invalid arg length", type_name, attr_name)
-                return False
-
-            if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
-                print("no list", value)
-                return False
-            if value is None:
-                if (
-                    info.fields[attr_name][1] != "?"
-                    and info.fields[attr_name][0] != "constant"
-                ):
-                    print("none not allowed", type_name, attr_name)
-                    return False
 
     tree_copy = deepcopy(tree)
 
@@ -1327,6 +1318,12 @@ def min_attr_length(node_type, attr_name):
     return 0
 
 
+def none_allowed(parents):
+    if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
+        return False
+    return True
+
+
 same_length = {
     "MatchClass": ["kwd_attrs", "kwd_patterns"],
     "MatchMapping": ["patterns", "keys"],
@@ -1394,7 +1391,11 @@ class AstGenerator:
                         for _ in range(attr_length(parents[-1][0], n))
                     ]
                 elif q == "?":
-                    return self.generate_impl(t, parents, depth) if self.cnd() else None
+                    return (
+                        self.generate_impl(t, parents, depth)
+                        if not none_allowed(parents) or self.cnd()
+                        else None
+                    )
                 else:
                     assert False
 
