@@ -8,18 +8,13 @@ import sys
 from copy import deepcopy
 from typing import Any
 
+from ._limits import f_string_expr_limit
+from ._limits import f_string_format_limit
+from ._utils import ast_dump
+from ._utils import unparse
 from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
-
-if sys.version_info >= (3, 9):
-    from ast import unparse
-else:
-    from astunparse import unparse  # type: ignore
-
-from ._limits import f_string_format_limit, f_string_expr_limit
-
-from ._utils import ast_dump
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
