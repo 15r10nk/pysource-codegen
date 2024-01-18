@@ -99,7 +99,6 @@ def equal_ast(lhs, rhs, dump_info=False, t="root"):
         return all(
             equal_ast(getattr(lhs, field), getattr(rhs, field), t + f".{field}")
             for field in lhs._fields
-            if field not in ("ctx",)
         )
     else:
         if dump_info and lhs != rhs:
@@ -505,7 +504,7 @@ def fix(node, parents):
     assign_context = [p for p in parents if p[0] not in ("Tuple", "List", "Starred")]
 
     if hasattr(node, "ctx"):
-        if use() and parents and parents[-1] == ("Delete", "targets"):
+        if use() and assign_context and assign_context[-1] == ("Delete", "targets"):
             node.ctx = ast.Del()
         elif (
             use()
@@ -514,6 +513,7 @@ def fix(node, parents):
             in (
                 ("Assign", "targets"),
                 ("AnnAssign", "target"),
+                ("NamedExpr", "target"),
                 ("For", "target"),
                 ("AsyncFor", "target"),
                 ("withitem", "optional_vars"),
@@ -521,7 +521,7 @@ def fix(node, parents):
             )
         ):
             node.ctx = ast.Store()
-        elif use():
+        else:
             node.ctx = ast.Load()
 
     if (

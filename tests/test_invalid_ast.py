@@ -17,7 +17,7 @@ sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def does_compile(tree: ast.AST):
+def does_compile(tree: ast.Module):
     for node in ast.walk(tree):
         if isinstance(node, ast.BoolOp) and len(node.values) < 2:
             return False
@@ -30,7 +30,9 @@ def does_compile(tree: ast.AST):
             warnings.simplefilter("ignore", SyntaxWarning)
             source = unparse(tree)
             compile(source, "<file>", "exec")
-    except:
+            compile(ast.fix_missing_locations(tree), "<file>", "exec")
+    except Exception as e:
+        print(e)
         return False
     return True
 
