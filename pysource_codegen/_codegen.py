@@ -92,12 +92,15 @@ def equal_ast(lhs, rhs, dump_info=False, t="root"):
             return False
 
         return all(
-            equal_ast(l, r, t + f"[{i}]") for i, (l, r) in enumerate(zip(lhs, rhs))
+            equal_ast(l, r, dump_info, t + f"[{i}]")
+            for i, (l, r) in enumerate(zip(lhs, rhs))
         )
 
     elif isinstance(lhs, ast.AST):
         return all(
-            equal_ast(getattr(lhs, field), getattr(rhs, field), t + f".{field}")
+            equal_ast(
+                getattr(lhs, field), getattr(rhs, field), dump_info, t + f".{field}"
+            )
             for field in lhs._fields
         )
     else:
@@ -954,24 +957,24 @@ def is_valid_ast(tree) -> bool:
                     return False
                 if value is None:
                     if not (
-                        (info.fields[attr_name][1] == "?" and none_allowed(parents))
+                        (
+                            info.fields[attr_name][1] == "?"
+                            and none_allowed(parents + [(type_name, attr_name)])
+                        )
                         or info.fields[attr_name][0] == "constant"
                     ):
-                        print("none not allowed", type_name, attr_name)
+                        print("none not allowed", parents, type_name, attr_name)
                         return False
 
             for field in node._fields:
                 value = getattr(node, field)
                 if isinstance(value, list):
                     if not all(
-                        is_valid(e, parents + [(node.__class__.__name__, field)])
-                        for e in value
+                        is_valid(e, parents + [(type_name, field)]) for e in value
                     ):
                         return False
                 else:
-                    if not is_valid(
-                        value, parents + [(node.__class__.__name__, field)]
-                    ):
+                    if not is_valid(value, parents + [(type_name, field)]):
                         return False
         return True
 
@@ -1006,7 +1009,7 @@ def is_valid_ast(tree) -> bool:
     tree_copy = fix_tree(tree_copy, [])
     tree_copy = fix_result(tree_copy)
 
-    result = equal_ast(tree_copy, tree)
+    result = equal_ast(tree_copy, tree, dump_info=True)
 
     if 1:
         if sys.version_info >= (3, 9) and not result:
