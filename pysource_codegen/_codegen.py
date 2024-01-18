@@ -1151,12 +1151,12 @@ def fix_nonlocal(node):
                 node.returns,
             ]
 
-            if sys.version_info < (3, 12):
-                all_nodes += [arg.annotation for arg in arguments(node)]
+            all_nodes += [arg.annotation for arg in arguments(node)]
 
             for default in all_nodes:
                 if default is not None:
                     self.visit(default)
+
             return node
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
@@ -1169,8 +1169,7 @@ def fix_nonlocal(node):
                 node.returns,
             ]
 
-            if sys.version_info < (3, 12):
-                all_nodes += [arg.annotation for arg in arguments(node)]
+            all_nodes += [arg.annotation for arg in arguments(node)]
 
             for default in all_nodes:
                 if default is not None:
