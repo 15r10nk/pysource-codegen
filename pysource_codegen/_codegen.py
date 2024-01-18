@@ -1189,6 +1189,14 @@ def fix_nonlocal(node):
 
             return node
 
+        # pattern matching
+        if sys.version_info >= (3, 10):
+
+            def visit_MatchMapping(self, node: ast.MatchMapping) -> Any:
+                if node.rest is not None:
+                    self.name_assigned(node.rest)
+                return self.generic_visit(node)
+
         def visit_ExceptHandler(self, handler):
             if handler.name:
                 self.name_assigned(handler.name)
