@@ -689,6 +689,12 @@ def fix(node, parents):
                 if self.condition(node.rest):
                     node.rest = None
 
+        class RemoveNameCleanup(ast.NodeTransformer):
+            def visit_MatchAs(self, node):
+                if node.name is None and node.pattern is not None:
+                    return self.visit(node.pattern)
+                return self.generic_visit(node)
+
         class FixPatternNames(ast.NodeTransformer):
             def __init__(self, used=None, allowed=None):
                 # variables which are already used
@@ -761,10 +767,6 @@ def fix(node, parents):
                 RemoveName(lambda name: name in seen).visit(pattern)
                 seen |= {*names(pattern)}
 
-        if isinstance(node, ast.MatchAs):
-            if node.name is None:
-                node.pattern = None
-
         if isinstance(node, ast.MatchOr):
             var_names = set.intersection(
                 *[set(names(pattern)) for pattern in node.patterns]
@@ -810,6 +812,9 @@ def fix(node, parents):
             for pattern in [*node.patterns, *node.kwd_patterns]:
                 RemoveName(lambda name: name in seen).visit(pattern)
                 seen |= {*names(pattern)}
+
+        if isinstance(node, ast.Match):
+            node = RemoveNameCleanup().visit(node)
 
     # async nodes
 
