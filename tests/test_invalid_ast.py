@@ -101,6 +101,7 @@ def generate_invalid_ast(seed):
         try:
             source = unparse(new_tree)
             compile(source, "<file>", "exec")
+            compile(ast.fix_missing_locations(tree), "<file>", "exec")
         except Exception as e:
             comment = f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
             if source:

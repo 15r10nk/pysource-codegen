@@ -1333,6 +1333,7 @@ same_length = {
     "MatchClass": ["kwd_attrs", "kwd_patterns"],
     "MatchMapping": ["patterns", "keys"],
     "arguments": ["kw_defaults", "kwonlyargs"],
+    "Compare": ["ops", "comparators"],
 }
 
 
