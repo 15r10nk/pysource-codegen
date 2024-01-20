@@ -711,21 +711,21 @@ def fix(node, parents):
 
             def visit_MatchAs(self, node):
                 if not self.is_allowed(node.name):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.name is not None:
                     self.used.add(node.name)
                 return self.generic_visit(node)
 
             def visit_MatchStar(self, node):
                 if not self.is_allowed(node.name):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.name is not None:
                     self.used.add(node.name)
                 return self.generic_visit(node)
 
             def visit_MatchMapping(self, node):
                 if not self.is_allowed(node.rest):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.rest is not None:
                     self.used.add(node.rest)
                 return self.generic_visit(node)
@@ -970,8 +970,17 @@ def is_valid_ast(tree) -> bool:
 
         if isinstance(node, (ast.AST)):
             info = get_info(type_name)
+            assert isinstance(info, NodeType)
 
             for attr_name, value in ast.iter_fields(node):
+                attr_info = info.fields[attr_name]
+                if attr_info[1] == "":
+                    value_info = get_info(attr_info[0])
+                    if isinstance(value_info, UnionNodeType):
+                        if type(value).__name__ not in value_info.options:
+                            print(f"{value} is not one type of {value_info.options}")
+                            return False
+
                 if isinstance(value, list) and len(value) < min_attr_length(
                     type_name, attr_name
                 ):
