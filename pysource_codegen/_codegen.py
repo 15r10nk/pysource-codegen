@@ -517,6 +517,7 @@ def fix(node, parents):
                 ("Assign", "targets"),
                 ("AnnAssign", "target"),
                 ("NamedExpr", "target"),
+                ("TypeAlias", "name"),
                 ("For", "target"),
                 ("AsyncFor", "target"),
                 ("withitem", "optional_vars"),
