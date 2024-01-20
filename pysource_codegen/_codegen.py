@@ -642,6 +642,13 @@ def fix(node, parents):
         ):
             node.value = node.value.operand
 
+        if (
+            isinstance(node, ast.MatchValue)
+            and isinstance(node.value, ast.Constant)
+            and any(node.value.value is v for v in (None, True, False))
+        ):
+            return ast.MatchSingleton(node.value.value)
+
         # @lambda f:lambda pattern:set(f(pattern))
         def names(node):
             if isinstance(node, ast.MatchAs) and node.name:
