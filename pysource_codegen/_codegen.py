@@ -516,6 +516,7 @@ def fix(node, parents):
             in (
                 ("Assign", "targets"),
                 ("AnnAssign", "target"),
+                ("AugAssign", "target"),
                 ("NamedExpr", "target"),
                 ("TypeAlias", "name"),
                 ("For", "target"),
