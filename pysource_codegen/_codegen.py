@@ -1305,6 +1305,7 @@ def fix_nonlocal(node):
 
 
 def min_attr_length(node_type, attr_name):
+    attr = f"{node_type}.{attr_name}"
     if node_type == "Module" and attr_name == "body":
         return 0
     if attr_name == "body":
@@ -1334,6 +1335,9 @@ def min_attr_length(node_type, attr_name):
     if node_type == "Compare" and attr_name in ("ops", "comparators"):
         return 1
     if attr_name == "generators":
+        return 1
+
+    if attr == "Assign.targets":
         return 1
 
     return 0
