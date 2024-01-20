@@ -1334,6 +1334,7 @@ same_length = {
     "MatchMapping": ["patterns", "keys"],
     "arguments": ["kw_defaults", "kwonlyargs"],
     "Compare": ["ops", "comparators"],
+    "Dict": ["keys", "values"],
 }
 
 
