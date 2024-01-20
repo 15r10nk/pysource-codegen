@@ -805,7 +805,7 @@ def fix(node, parents):
                 seen |= {*names(pattern)}
 
         if isinstance(node, ast.MatchClass):
-            node.kwd_attrs = list(set(node.kwd_attrs))
+            node.kwd_attrs = unique_by(node.kwd_attrs, lambda e: e)
             del node.kwd_patterns[len(node.kwd_attrs) :]
 
             seen = set()
