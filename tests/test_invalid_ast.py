@@ -67,14 +67,13 @@ def generate_invalid_ast(seed):
     print("seed=", seed)
 
     tree = generate_ast(seed)
+    try:
+        assert is_valid_ast(tree)
+    except:
+        print(f"error for is_valid_ast seed={seed}")
+        raise
 
     if not does_compile(tree):
-        try:
-            assert is_valid_ast(tree)
-        except:
-            print(f"error for is_valid_ast seed={seed}")
-            raise
-
         last_checked_tree = tree
 
         def checker(tree):
