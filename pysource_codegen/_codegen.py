@@ -479,6 +479,13 @@ def fix(node, parents):
                 new_elts.append(e)
         node.elts = new_elts
 
+    if (
+        use()
+        and isinstance(node, ast.AnnAssign)
+        and not isinstance(node.target, ast.Name)
+    ):
+        node.simple = 0
+
     if isinstance(node, ast.Constant):
         # TODO: what is Constant.kind
         # Constant.kind can be u for unicode strings
