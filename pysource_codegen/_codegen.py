@@ -1185,7 +1185,9 @@ def fix_nonlocal(node):
             ):
                 if node.value:
                     return self.generic_visit(
-                        ast.Assign(targets=[node.target], value=node.value)
+                        ast.Assign(
+                            targets=[node.target], value=node.value, type_comment=None
+                        )
                     )
                 else:
                     return ast.Pass()
