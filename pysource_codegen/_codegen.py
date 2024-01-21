@@ -205,6 +205,10 @@ def propability(parents, child_name):
     ):
         return 0
 
+    if child_name == "ExtSlice" and parents[-1] == ("ExtSlice", "dims"):
+        # SystemError('extended slice invalid in nested slice')
+        return 0
+
     # f-string
     if parents[-1] == ("JoinedStr", "values") and child_name not in (
         "Constant",
