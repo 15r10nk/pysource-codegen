@@ -412,6 +412,14 @@ def propability(parents, child_name):
         if parents[-1] == ("TypeAlias", "name") and child_name != "Name":
             return 0
 
+        if (
+            child_name == "Lambda"
+            and inside("TypeAlias.value")
+            and inside("ClassDef.body")
+        ):
+            # SyntaxError('Cannot use lambda in annotation scope within class scope')
+            return 0
+
         if child_name in (
             "NamedExpr",
             "Yield",
