@@ -1,3 +1,30 @@
+## v0.5.1 (2024-01-23)
+
+### Fix
+
+- add no type_comment when changing AnnAssign to Assign
+- **3.8**: ExtSlice can not be nested
+- no lambda in annotation scope within class scope
+- use None MatchSingleton for invalid match expressions
+- do not change the order of MatchClass.kwd_attrs
+- correct handling of MatchAs without a name
+- MatchSingleton can only be used for None, True or False
+- Assign.target needs a minimal length of 1
+- AnnAssign can only be simple if the target is a Name
+- MatchValue can not be used for None, True or False
+- AugAssign requires Store context for target
+- TypeAlias.name requires a Store context
+- Dict .keys and .values has the same number of elements
+- Compare .ops and .comparators has the same number of elementes
+- use correct .ctx for nodes
+- analyse rest in mapping-pattern as written variable
+- **global**: analyse used variables in annotations
+- allow only except handler with a type in try-star blocks
+
+### Refactor
+
+- moved unparse to utils
+
 ## v0.5.0 (2023-11-29)
 
 ### Feat

@@ -63,6 +63,13 @@ def test_invalid_ast(file):
     assert is_valid_ast(tree) == does_compile(tree)
 
 
+def x_test_example():
+    seed = 2273381
+    tree = generate_ast(seed)
+    # print(ast.dump(tree, indent=2))
+    assert is_valid_ast(tree)
+
+
 def generate_invalid_ast(seed):
     print("seed=", seed)
 
