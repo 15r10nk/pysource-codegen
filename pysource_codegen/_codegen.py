@@ -8,18 +8,13 @@ import sys
 from copy import deepcopy
 from typing import Any
 
+from ._limits import f_string_expr_limit
+from ._limits import f_string_format_limit
+from ._utils import ast_dump
+from ._utils import unparse
 from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
-
-if sys.version_info >= (3, 9):
-    from ast import unparse
-else:
-    from astunparse import unparse  # type: ignore
-
-from ._limits import f_string_format_limit, f_string_expr_limit
-
-from ._utils import ast_dump
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
@@ -97,14 +92,16 @@ def equal_ast(lhs, rhs, dump_info=False, t="root"):
             return False
 
         return all(
-            equal_ast(l, r, t + f"[{i}]") for i, (l, r) in enumerate(zip(lhs, rhs))
+            equal_ast(l, r, dump_info, t + f"[{i}]")
+            for i, (l, r) in enumerate(zip(lhs, rhs))
         )
 
     elif isinstance(lhs, ast.AST):
         return all(
-            equal_ast(getattr(lhs, field), getattr(rhs, field), t + f".{field}")
+            equal_ast(
+                getattr(lhs, field), getattr(rhs, field), dump_info, t + f".{field}"
+            )
             for field in lhs._fields
-            if field not in ("ctx",)
         )
     else:
         if dump_info and lhs != rhs:
@@ -206,6 +203,10 @@ def propability(parents, child_name):
             ("Tuple", "elts"),
         ]
     ):
+        return 0
+
+    if child_name == "ExtSlice" and parents[-1] == ("ExtSlice", "dims"):
+        # SystemError('extended slice invalid in nested slice')
         return 0
 
     # f-string
@@ -415,6 +416,14 @@ def propability(parents, child_name):
         if parents[-1] == ("TypeAlias", "name") and child_name != "Name":
             return 0
 
+        if (
+            child_name == "Lambda"
+            and inside("TypeAlias.value")
+            and inside("ClassDef.body")
+        ):
+            # SyntaxError('Cannot use lambda in annotation scope within class scope')
+            return 0
+
         if child_name in (
             "NamedExpr",
             "Yield",
@@ -482,6 +491,13 @@ def fix(node, parents):
                 new_elts.append(e)
         node.elts = new_elts
 
+    if (
+        use()
+        and isinstance(node, ast.AnnAssign)
+        and not isinstance(node.target, ast.Name)
+    ):
+        node.simple = 0
+
     if isinstance(node, ast.Constant):
         # TODO: what is Constant.kind
         # Constant.kind can be u for unicode strings
@@ -510,7 +526,7 @@ def fix(node, parents):
     assign_context = [p for p in parents if p[0] not in ("Tuple", "List", "Starred")]
 
     if hasattr(node, "ctx"):
-        if use() and parents and parents[-1] == ("Delete", "targets"):
+        if use() and assign_context and assign_context[-1] == ("Delete", "targets"):
             node.ctx = ast.Del()
         elif (
             use()
@@ -519,6 +535,9 @@ def fix(node, parents):
             in (
                 ("Assign", "targets"),
                 ("AnnAssign", "target"),
+                ("AugAssign", "target"),
+                ("NamedExpr", "target"),
+                ("TypeAlias", "name"),
                 ("For", "target"),
                 ("AsyncFor", "target"),
                 ("withitem", "optional_vars"),
@@ -526,7 +545,7 @@ def fix(node, parents):
             )
         ):
             node.ctx = ast.Store()
-        elif use():
+        else:
             node.ctx = ast.Load()
 
     if (
@@ -580,13 +599,6 @@ def fix(node, parents):
     if use() and isinstance(node, (ast.Try)):
         node.handlers[:-1] = [
             handler for handler in node.handlers[:-1] if handler.type is not None
-        ]
-        if use() and not node.handlers:
-            node.orelse = []
-
-    if use() and sys.version_info >= (3, 11) and isinstance(node, ast.TryStar):
-        node.handlers = [
-            handler for handler in node.handlers if handler.type is not None
         ]
         if use() and not node.handlers:
             node.orelse = []
@@ -649,6 +661,18 @@ def fix(node, parents):
         ):
             node.value = node.value.operand
 
+        if (
+            isinstance(node, ast.MatchValue)
+            and isinstance(node.value, ast.Constant)
+            and any(node.value.value is v for v in (None, True, False))
+        ):
+            return ast.MatchSingleton(value=node.value.value)
+
+        if isinstance(node, ast.MatchSingleton) and not any(
+            node.value is v for v in (None, True, False)
+        ):
+            return ast.MatchValue(value=ast.Constant(value=node.value))
+
         # @lambda f:lambda pattern:set(f(pattern))
         def names(node):
             if isinstance(node, ast.MatchAs) and node.name:
@@ -677,6 +701,12 @@ def fix(node, parents):
                 if self.condition(node.rest):
                     node.rest = None
 
+        class RemoveNameCleanup(ast.NodeTransformer):
+            def visit_MatchAs(self, node):
+                if node.name is None and node.pattern is not None:
+                    return self.visit(node.pattern)
+                return self.generic_visit(node)
+
         class FixPatternNames(ast.NodeTransformer):
             def __init__(self, used=None, allowed=None):
                 # variables which are already used
@@ -693,21 +723,21 @@ def fix(node, parents):
 
             def visit_MatchAs(self, node):
                 if not self.is_allowed(node.name):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.name is not None:
                     self.used.add(node.name)
                 return self.generic_visit(node)
 
             def visit_MatchStar(self, node):
                 if not self.is_allowed(node.name):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.name is not None:
                     self.used.add(node.name)
                 return self.generic_visit(node)
 
             def visit_MatchMapping(self, node):
                 if not self.is_allowed(node.rest):
-                    return ast.Constant(value=None)
+                    return ast.MatchSingleton(value=None)
                 elif node.rest is not None:
                     self.used.add(node.rest)
                 return self.generic_visit(node)
@@ -749,10 +779,6 @@ def fix(node, parents):
                 RemoveName(lambda name: name in seen).visit(pattern)
                 seen |= {*names(pattern)}
 
-        if isinstance(node, ast.MatchAs):
-            if node.name is None:
-                node.pattern = None
-
         if isinstance(node, ast.MatchOr):
             var_names = set.intersection(
                 *[set(names(pattern)) for pattern in node.patterns]
@@ -791,13 +817,16 @@ def fix(node, parents):
                 seen |= {*names(pattern)}
 
         if isinstance(node, ast.MatchClass):
-            node.kwd_attrs = list(set(node.kwd_attrs))
+            node.kwd_attrs = unique_by(node.kwd_attrs, lambda e: e)
             del node.kwd_patterns[len(node.kwd_attrs) :]
 
             seen = set()
             for pattern in [*node.patterns, *node.kwd_patterns]:
                 RemoveName(lambda name: name in seen).visit(pattern)
                 seen |= {*names(pattern)}
+
+        if isinstance(node, ast.Match):
+            node = RemoveNameCleanup().visit(node)
 
     # async nodes
 
@@ -924,13 +953,13 @@ def fix_result(node):
 
 def is_valid_ast(tree) -> bool:
     def is_valid(node: ast.AST, parents):
-        node_type = node.__class__.__name__
+        type_name = node.__class__.__name__
         if (
             isinstance(node, (ast.AST))
             and parents
             and propability(
                 parents,
-                node_type,
+                type_name,
             )
             == 0
         ):
@@ -946,51 +975,58 @@ def is_valid_ast(tree) -> bool:
 
             return False
 
-        if node_type in same_length:
-            attrs = same_length[node_type]
+        if type_name in same_length:
+            attrs = same_length[type_name]
             if len({len(v) for k, v in ast.iter_fields(node) if k in attrs}) != 1:
                 return False
 
         if isinstance(node, (ast.AST)):
+            info = get_info(type_name)
+            assert isinstance(info, NodeType)
+
+            for attr_name, value in ast.iter_fields(node):
+                attr_info = info.fields[attr_name]
+                if attr_info[1] == "":
+                    value_info = get_info(attr_info[0])
+                    if isinstance(value_info, UnionNodeType):
+                        if type(value).__name__ not in value_info.options:
+                            print(f"{value} is not one type of {value_info.options}")
+                            return False
+
+                if isinstance(value, list) and len(value) < min_attr_length(
+                    type_name, attr_name
+                ):
+                    print("invalid arg length", type_name, attr_name)
+                    return False
+
+                if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
+                    print("no list", value)
+                    return False
+                if value is None:
+                    if not (
+                        (
+                            info.fields[attr_name][1] == "?"
+                            and none_allowed(parents + [(type_name, attr_name)])
+                        )
+                        or info.fields[attr_name][0] == "constant"
+                    ):
+                        print("none not allowed", parents, type_name, attr_name)
+                        return False
+
             for field in node._fields:
                 value = getattr(node, field)
                 if isinstance(value, list):
                     if not all(
-                        is_valid(e, parents + [(node.__class__.__name__, field)])
-                        for e in value
+                        is_valid(e, parents + [(type_name, field)]) for e in value
                     ):
                         return False
                 else:
-                    if not is_valid(
-                        value, parents + [(node.__class__.__name__, field)]
-                    ):
+                    if not is_valid(value, parents + [(type_name, field)]):
                         return False
         return True
 
     if not is_valid(tree, []):
         return False
-
-    for node in ast.walk(tree):
-        type_name = node.__class__.__name__
-        info = get_info(type_name)
-
-        for attr_name, value in ast.iter_fields(node):
-            if isinstance(value, list) and len(value) < min_attr_length(
-                type_name, attr_name
-            ):
-                print("invalid arg length", type_name, attr_name)
-                return False
-
-            if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
-                print("no list", value)
-                return False
-            if value is None:
-                if (
-                    info.fields[attr_name][1] != "?"
-                    and info.fields[attr_name][0] != "constant"
-                ):
-                    print("none not allowed", type_name, attr_name)
-                    return False
 
     tree_copy = deepcopy(tree)
 
@@ -1020,7 +1056,7 @@ def is_valid_ast(tree) -> bool:
     tree_copy = fix_tree(tree_copy, [])
     tree_copy = fix_result(tree_copy)
 
-    result = equal_ast(tree_copy, tree)
+    result = equal_ast(tree_copy, tree, dump_info=True)
 
     if 1:
         if sys.version_info >= (3, 9) and not result:
@@ -1149,7 +1185,9 @@ def fix_nonlocal(node):
             ):
                 if node.value:
                     return self.generic_visit(
-                        ast.Assign(targets=[node.target], value=node.value)
+                        ast.Assign(
+                            targets=[node.target], value=node.value, type_comment=None
+                        )
                     )
                 else:
                     return ast.Pass()
@@ -1165,12 +1203,12 @@ def fix_nonlocal(node):
                 node.returns,
             ]
 
-            if sys.version_info < (3, 12):
-                all_nodes += [arg.annotation for arg in arguments(node)]
+            all_nodes += [arg.annotation for arg in arguments(node)]
 
             for default in all_nodes:
                 if default is not None:
                     self.visit(default)
+
             return node
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
@@ -1183,8 +1221,7 @@ def fix_nonlocal(node):
                 node.returns,
             ]
 
-            if sys.version_info < (3, 12):
-                all_nodes += [arg.annotation for arg in arguments(node)]
+            all_nodes += [arg.annotation for arg in arguments(node)]
 
             for default in all_nodes:
                 if default is not None:
@@ -1203,6 +1240,14 @@ def fix_nonlocal(node):
             self.name_assigned(node.name)
 
             return node
+
+        # pattern matching
+        if sys.version_info >= (3, 10):
+
+            def visit_MatchMapping(self, node: ast.MatchMapping) -> Any:
+                if node.rest is not None:
+                    self.name_assigned(node.rest)
+                return self.generic_visit(node)
 
         def visit_ExceptHandler(self, handler):
             if handler.name:
@@ -1293,6 +1338,7 @@ def fix_nonlocal(node):
 
 
 def min_attr_length(node_type, attr_name):
+    attr = f"{node_type}.{attr_name}"
     if node_type == "Module" and attr_name == "body":
         return 0
     if attr_name == "body":
@@ -1324,13 +1370,24 @@ def min_attr_length(node_type, attr_name):
     if attr_name == "generators":
         return 1
 
+    if attr == "Assign.targets":
+        return 1
+
     return 0
+
+
+def none_allowed(parents):
+    if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
+        return False
+    return True
 
 
 same_length = {
     "MatchClass": ["kwd_attrs", "kwd_patterns"],
     "MatchMapping": ["patterns", "keys"],
     "arguments": ["kw_defaults", "kwonlyargs"],
+    "Compare": ["ops", "comparators"],
+    "Dict": ["keys", "values"],
 }
 
 
@@ -1394,7 +1451,11 @@ class AstGenerator:
                         for _ in range(attr_length(parents[-1][0], n))
                     ]
                 elif q == "?":
-                    return self.generate_impl(t, parents, depth) if self.cnd() else None
+                    return (
+                        self.generate_impl(t, parents, depth)
+                        if not none_allowed(parents) or self.cnd()
+                        else None
+                    )
                 else:
                     assert False
 

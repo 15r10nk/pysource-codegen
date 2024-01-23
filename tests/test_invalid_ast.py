@@ -17,7 +17,7 @@ sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def does_compile(tree: ast.AST):
+def does_compile(tree: ast.Module):
     for node in ast.walk(tree):
         if isinstance(node, ast.BoolOp) and len(node.values) < 2:
             return False
@@ -30,7 +30,9 @@ def does_compile(tree: ast.AST):
             warnings.simplefilter("ignore", SyntaxWarning)
             source = unparse(tree)
             compile(source, "<file>", "exec")
-    except:
+            compile(ast.fix_missing_locations(tree), "<file>", "exec")
+    except Exception as e:
+        print(e)
         return False
     return True
 
@@ -61,18 +63,24 @@ def test_invalid_ast(file):
     assert is_valid_ast(tree) == does_compile(tree)
 
 
+def x_test_example():
+    seed = 2273381
+    tree = generate_ast(seed)
+    # print(ast.dump(tree, indent=2))
+    assert is_valid_ast(tree)
+
+
 def generate_invalid_ast(seed):
     print("seed=", seed)
 
     tree = generate_ast(seed)
+    try:
+        assert is_valid_ast(tree)
+    except:
+        print(f"error for is_valid_ast seed={seed}")
+        raise
 
     if not does_compile(tree):
-        try:
-            assert is_valid_ast(tree)
-        except:
-            print(f"error for is_valid_ast seed={seed}")
-            raise
-
         last_checked_tree = tree
 
         def checker(tree):
@@ -100,6 +108,7 @@ def generate_invalid_ast(seed):
         try:
             source = unparse(new_tree)
             compile(source, "<file>", "exec")
+            compile(ast.fix_missing_locations(tree), "<file>", "exec")
         except Exception as e:
             comment = f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
             if source:
