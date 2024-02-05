@@ -1044,9 +1044,11 @@ def is_valid_ast(tree) -> bool:
                     node,
                     field,
                     [
-                        fix_tree(v, parents + [(node.__class__.__name__, field)])
-                        if isinstance(v, ast.AST)
-                        else v
+                        (
+                            fix_tree(v, parents + [(node.__class__.__name__, field)])
+                            if isinstance(v, ast.AST)
+                            else v
+                        )
                         for v in value
                     ],
                 )
@@ -1612,8 +1614,7 @@ class PartialNode:
     _defined_attrs: dict
     _context: dict
 
-    def inside(self, spec) -> PartialNode | None:
-        ...
+    def inside(self, spec) -> PartialNode | None: ...
 
     @property
     def parent(self):
