@@ -42,7 +42,7 @@ repos:
 - hooks:
   - id: black
   repo: https://github.com/psf/black
-  rev: 23.12.1
+  rev: 24.1.1
 - hooks:
   - id: blacken-docs
   repo: https://github.com/asottile/blacken-docs
@@ -63,4 +63,4 @@ repos:
     stages:
     - commit-msg
   repo: https://github.com/commitizen-tools/commitizen
-  rev: v3.13.0
+  rev: v3.14.1
