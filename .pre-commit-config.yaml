@@ -20,7 +20,7 @@ repos:
     - --ignore-init-module-imports
     id: autoflake
   repo: https://github.com/myint/autoflake
-  rev: v2.2.1
+  rev: v2.3.1
 
 - repo: https://github.com/asottile/setup-cfg-fmt
   rev: v2.5.0
@@ -38,11 +38,11 @@ repos:
     - --py38-plus
     id: pyupgrade
   repo: https://github.com/asottile/pyupgrade
-  rev: v3.15.0
+  rev: v3.15.2
 - hooks:
   - id: black
   repo: https://github.com/psf/black
-  rev: 24.1.1
+  rev: 24.3.0
 - hooks:
   - id: blacken-docs
   repo: https://github.com/asottile/blacken-docs
@@ -63,4 +63,4 @@ repos:
     stages:
     - commit-msg
   repo: https://github.com/commitizen-tools/commitizen
-  rev: v3.14.1
+  rev: v3.20.0
