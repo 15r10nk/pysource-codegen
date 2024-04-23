@@ -1,3 +1,9 @@
+## v0.5.2 (2024-04-23)
+
+### Fix
+
+- Explicitly re-export `generate()` in `__init__.py`
+
 ## v0.5.1 (2024-01-23)
 
 ### Fix
