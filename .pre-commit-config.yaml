@@ -11,7 +11,7 @@ repos:
   - id: check-json
   - id: end-of-file-fixer
   repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v4.5.0
+  rev: v4.6.0
 - hooks:
   - args:
     - --in-place
@@ -28,7 +28,7 @@ repos:
   - id: setup-cfg-fmt
 
 - repo: https://github.com/asottile/reorder-python-imports
-  rev: v3.12.0
+  rev: v3.13.0
   hooks:
   - args:
     - --py38-plus
@@ -42,14 +42,14 @@ repos:
 - hooks:
   - id: black
   repo: https://github.com/psf/black
-  rev: 24.3.0
+  rev: 24.4.2
 - hooks:
   - id: blacken-docs
   repo: https://github.com/asottile/blacken-docs
   rev: 1.16.0
 
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-  rev: v2.12.0
+  rev: v2.13.0
   hooks:
   - id: pretty-format-yaml
     args: [--autofix, --indent, '2']
@@ -63,4 +63,4 @@ repos:
     stages:
     - commit-msg
   repo: https://github.com/commitizen-tools/commitizen
-  rev: v3.20.0
+  rev: v3.27.0
