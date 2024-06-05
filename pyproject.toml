@@ -21,6 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -37,6 +38,9 @@ Source = "https://github.com/15r10nk/pysource-codegen"
 [tool.hatch.version]
 path = "src/pysource_codegen/__init__.py"
 
+[[tool.hatch.envs.hatch-test.matrix]]
+python=["3.8","3.9","3.10","3.11","3.12","3.13"]
+
 [tool.hatch.envs.hatch-test]
 extra-dependencies=[
 "rich>=12.0.0",
@@ -45,7 +49,7 @@ extra-dependencies=[
 ]
 
 [[tool.hatch.envs.types.matrix]]
-python=["3.8","3.9","3.10","3.11","3.12"]
+python=["3.8","3.9","3.10","3.11","3.12","3.13"]
 
 [tool.hatch.envs.types]
 extra-dependencies = [
