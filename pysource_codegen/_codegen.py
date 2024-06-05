@@ -420,6 +420,7 @@ def propability(parents, child_name):
             child_name == "Lambda"
             and inside("TypeAlias.value")
             and inside("ClassDef.body")
+            and sys.version_info < (3, 13)
         ):
             # SyntaxError('Cannot use lambda in annotation scope within class scope')
             return 0
@@ -943,6 +944,16 @@ def fix(node, parents):
 
         if use() and isinstance(node, ast.AnnAssign):
             node.annotation = cleanup_annotation(node.annotation)
+
+    if sys.version_info >= (3, 13):
+        if hasattr(node, "type_params"):
+            # non-default type parameter 'name_1' follows default type parameter
+            no_default = False
+            for child in reversed(node.type_params):
+                if child.default_value != None:
+                    no_default = True
+                if use() and no_default:
+                    child.default_value = None
 
     return node
 
