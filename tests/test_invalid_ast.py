@@ -95,7 +95,7 @@ def generate_invalid_ast(seed):
             new_tree = minimize_ast(tree, checker)
         except:
             print(f"error happend while minimize_ast seed={seed}")
-            ast_dump(last_checked_tree)
+            print(ast_dump(last_checked_tree))
             raise
 
         print(
