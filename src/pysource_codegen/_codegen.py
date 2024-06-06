@@ -1262,6 +1262,12 @@ def fix_nonlocal(node):
                     self.name_assigned(node.rest)
                 return self.generic_visit(node)
 
+        if sys.version_info >= (3, 13):
+
+            def visit_MatchStar(self, node: ast.MatchStar) -> Any:
+                self.name_assigned(node.name)
+                return self.generic_visit(node)
+
         def visit_ExceptHandler(self, handler):
             if handler.name:
                 self.name_assigned(handler.name)
