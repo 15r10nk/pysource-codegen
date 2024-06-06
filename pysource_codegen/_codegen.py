@@ -1104,7 +1104,7 @@ def fix_nonlocal(node):
         removes invalid Nonlocals from the class/function
         """
 
-        def __init__(self, locals, nonlocals, globals, type_params):
+        def __init__(self, locals, nonlocals, globals, type_params, parent_globals):
             self.locals = set(locals)
             self.used_names = set(locals)
             self.type_params = set(type_params)
@@ -1116,6 +1116,7 @@ def fix_nonlocal(node):
             # globals from the global scope
             self.globals = set(globals)
             self.used_globals = set()
+            self.parent_globals = parent_globals
 
         def name_assigned(self, name):
             self.locals.add(name)
@@ -1166,6 +1167,7 @@ def fix_nonlocal(node):
                 and name in self.nonlocals
                 and name not in self.used_names
                 and name not in self.type_params
+                and name not in self.parent_globals
                 and name not in self.used_globals
                 or name in ("__class__",)
             ]
@@ -1304,10 +1306,11 @@ def fix_nonlocal(node):
         - transformes a class/function
         """
 
-        def __init__(self, nonlocals, globals, type_params):
+        def __init__(self, nonlocals, globals, type_params, parent_globals):
             self.nonlocals = set(nonlocals)
             self.globals = set(globals)
             self.type_params = type_params
+            self.parent_globals = parent_globals
 
         def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
             return self.handle_function(node)
@@ -1324,10 +1327,14 @@ def fix_nonlocal(node):
             if sys.version_info >= (3, 12):
                 type_params |= {typ.name for typ in node.type_params}  # type: ignore
 
-            fixer = NonLocalFixer([], self.nonlocals, self.globals, type_params)
+            fixer = NonLocalFixer(
+                [], self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [fixer.visit(stmt) for stmt in node.body]
 
-            ft = FunctionTransformer(self.nonlocals, self.globals, type_params)
+            ft = FunctionTransformer(
+                self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [ft.visit(stmt) for stmt in node.body]
 
             return node
@@ -1339,20 +1346,25 @@ def fix_nonlocal(node):
             if sys.version_info >= (3, 12):
                 type_params |= {typ.name for typ in node.type_params}  # type: ignore
 
-            fixer = NonLocalFixer(names, self.nonlocals, self.globals, type_params)
+            fixer = NonLocalFixer(
+                names, self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [fixer.visit(stmt) for stmt in node.body]
 
             ft = FunctionTransformer(
-                fixer.locals | self.nonlocals, self.globals, type_params
+                fixer.locals | self.nonlocals,
+                self.globals,
+                type_params,
+                fixer.used_globals,
             )
             node.body = [ft.visit(stmt) for stmt in node.body]
 
             return node
 
-    fixer = NonLocalFixer([], [], [], [])
+    fixer = NonLocalFixer([], [], [], [], [])
     node = fixer.visit(node)
 
-    node = FunctionTransformer([], [], []).visit(node)
+    node = FunctionTransformer([], [], [], []).visit(node)
     return node
 
 
