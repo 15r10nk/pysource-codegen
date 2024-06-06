@@ -1530,6 +1530,8 @@ class AstGenerator:
                         "some const text",
                         b"",
                         "",
+                        "'\"'''\"\"\"{}\\",
+                        b"'\"'''\"\"\"{}\\",
                         self.rand.randint(0, 20),
                         self.rand.uniform(0, 20),
                         True,
