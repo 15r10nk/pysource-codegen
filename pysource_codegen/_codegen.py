@@ -74,7 +74,8 @@ def use():
     """
     this function is mocked in test_valid_source to ignore some decisions
     which are usually made by the algo.
-    The goal is to try to generate some valid source code which would otherwise not be generated.
+    The goal is to try to generate some valid source code which would otherwise not be generated,
+    becaus the algo falsely thinks it is invalid.
     """
     return True
 
@@ -355,6 +356,13 @@ def propability(parents, child_name):
         "Constant",
         "UnaryOp",
         "USub",
+    ):
+        return 0
+
+    if (
+        inside("MatchValue.value")
+        and inside("Attribute.value")
+        and child_name not in ("Attribute", "Name")
     ):
         return 0
 
@@ -1001,7 +1009,10 @@ def is_valid_ast(tree) -> bool:
                     value_info = get_info(attr_info[0])
                     if isinstance(value_info, UnionNodeType):
                         if type(value).__name__ not in value_info.options:
-                            print(f"{value} is not one type of {value_info.options}")
+                            print(
+                                f"{type(node).__name__}.{attr_name} {value} is not one type of {value_info.options}"
+                            )
+                            print("parents are:", parents)
                             return False
 
                 if isinstance(value, list) and len(value) < min_attr_length(
