@@ -1148,20 +1148,29 @@ def fix_nonlocal(node):
                 self.name_assigned(node.name)
                 return node
 
+        def search_walrus(self, node):
+            for n in ast.walk(node):
+                if isinstance(n, ast.NamedExpr):
+                    self.visit(n.target)
+
         def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_ListComp(self, node: ast.ListComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_DictComp(self, node: ast.DictComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_SetComp(self, node: ast.SetComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
