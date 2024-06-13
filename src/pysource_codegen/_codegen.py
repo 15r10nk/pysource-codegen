@@ -438,7 +438,6 @@ def propability(parents, child_name):
             "Yield",
             "YieldFrom",
             "Await",
-            "ListComp",
             "DictComp",
             "SetComp",
             "GeneratorExp",
