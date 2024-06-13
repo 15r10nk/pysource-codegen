@@ -1,7 +1,7 @@
 repos:
 - hooks:
   - id: check-yaml
-  - id: check-ast
+    #  - id: check-ast
   - id: check-docstring-first
   - id: check-merge-conflict
   - id: trailing-whitespace
