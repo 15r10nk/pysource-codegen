@@ -921,10 +921,10 @@ def fix(node, parents):
                         return self.generic_visit(node)
                     return self.visit(node.value)
 
-                def visit_Lambda(self, node: ast.Lambda) -> Any:
-                    if not use():
-                        return self.generic_visit(node)
-                    return self.visit(node.body)
+                # def visit_Lambda(self, node: ast.Lambda) -> Any:
+                #     if not use():
+                #         return self.generic_visit(node)
+                #     return self.visit(node.body)
 
             return Transformer().visit(annotation)
 
@@ -1100,6 +1100,8 @@ def is_valid_ast(tree) -> bool:
             dump_copy = ast_dump(tree_copy).splitlines()
             dump = ast_dump(tree).splitlines()
             import difflib
+
+            print("ast was changed by during fixing:")
 
             print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
 
