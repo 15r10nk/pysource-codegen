@@ -452,7 +452,6 @@ def propability_try(parents, child_name):
             "Await",
             "DictComp",
             "SetComp",
-            "GeneratorExp",
         ) and inside(
             (
                 "ClassDef.bases",
