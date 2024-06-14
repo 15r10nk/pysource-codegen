@@ -451,7 +451,8 @@ def propability_try(parents, child_name):
             "YieldFrom",
             "Await",
             "DictComp",
-            "SetComp",
+            # "ListComp",
+            # "SetComp",
         ) and inside(
             (
                 "ClassDef.bases",
