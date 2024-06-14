@@ -450,7 +450,7 @@ def propability_try(parents, child_name):
             "Yield",
             "YieldFrom",
             "Await",
-            "DictComp",
+            # "DictComp",
             # "ListComp",
             # "SetComp",
         ) and inside(
