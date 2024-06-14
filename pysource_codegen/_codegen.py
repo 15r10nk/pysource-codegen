@@ -446,7 +446,7 @@ def propability_try(parents, child_name):
             raise Invalid
 
         if child_name in (
-            "NamedExpr",
+            # "NamedExpr",
             "Yield",
             "YieldFrom",
             "Await",
@@ -464,6 +464,11 @@ def propability_try(parents, child_name):
                 "TypeVar.bound",
             )
         ):
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            raise Invalid
+
+        if child_name in ("NamedExpr",) and inside(("TypeAlias.value",)):
             # todo this should only be invalid in type scopes (when the class/def has type parameters)
             # and only for async comprehensions
             raise Invalid
