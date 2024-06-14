@@ -27,12 +27,20 @@ def pytest_sessionfinish(session, exitstatus):
 
     if exitstatus == 0 and session.config.option.generate_samples:
         end_time = time.time() + 60 * 5
-        with get_context("spawn").Pool(maxtasksperchild=100) as p:
-            for r in p.imap_unordered(generate, seeds()):
-                if r:
+        if False:
+            for seed in seeds():
+                if generate(seed):
                     break
-
                 if time.time() > end_time:
                     print("Timeout")
                     break
-            p.terminate()
+        else:
+            with get_context("spawn").Pool(maxtasksperchild=100) as p:
+                for r in p.imap_unordered(generate, seeds()):
+                    if r:
+                        break
+
+                    if time.time() > end_time:
+                        print("Timeout")
+                        break
+                p.terminate()
