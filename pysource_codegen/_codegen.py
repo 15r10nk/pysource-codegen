@@ -306,6 +306,7 @@ def propability_try(parents, child_name):
         ("Call", "args"),
         ("List", "elts"),
         ("Set", "elts"),
+        ("ClassDef", "bases"),
     ):
         raise Invalid
 
