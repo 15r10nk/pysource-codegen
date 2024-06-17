@@ -861,7 +861,7 @@ def fix(node, parents):
         if parent == "AsyncFunctionDef" and attr == "body":
             in_async_code = True
             break
-        if parent in ("FunctionDef", "Lambda", "ClassDef"):
+        if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
             break
 
         if not py311plus and parent in (
