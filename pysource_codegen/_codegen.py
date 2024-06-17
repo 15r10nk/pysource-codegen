@@ -867,6 +867,9 @@ def fix(node, parents):
         if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
             break
 
+        if (parent, attr) == ("arg", "annotation"):
+            break
+
         if not py311plus and parent in (
             "ListComp",
             "DictComp",
