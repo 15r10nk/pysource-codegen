@@ -905,8 +905,6 @@ def fix(node, parents):
             node.args.kwarg.annotation = None
 
     if sys.version_info >= (3, 12):
-        if use() and isinstance(node, ast.Global):
-            node.names = unique_by(node.names, lambda e: e)
 
         # type scopes
         if use() and hasattr(node, "type_params"):
