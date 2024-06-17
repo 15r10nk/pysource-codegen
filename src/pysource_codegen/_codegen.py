@@ -341,7 +341,8 @@ def propability_try(parents, child_name):
         raise Invalid
 
     in_async_code = inside(
-        "AsyncFunctionDef.body", ("FunctionDef.body", "Lambda.body", "ClassDef.body")
+        ("AsyncFunctionDef.body", "GeneratorExp.elt"),
+        ("FunctionDef.body", "Lambda.body", "ClassDef.body"),
     )
 
     if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
