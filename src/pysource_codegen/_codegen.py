@@ -867,7 +867,7 @@ def fix(node, parents):
         if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
             break
 
-        if (parent, attr) == ("arg", "annotation"):
+        if (parent, attr) in (("arg", "annotation"), ("AsyncFunctionDef", "returns")):
             break
 
         if not py311plus and parent in (
