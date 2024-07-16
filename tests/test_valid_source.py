@@ -4,12 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pysource_minimize import minimize
-
-from .test_invalid_ast import does_compile
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
+from pysource_minimize import minimize
+
+from .test_invalid_ast import does_compile
 
 sample_dir = Path(__file__).parent / "valid_source_samples"
 sample_dir.mkdir(exist_ok=True)

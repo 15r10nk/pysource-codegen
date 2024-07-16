@@ -6,12 +6,11 @@ import warnings
 from pathlib import Path
 
 import pytest
-from pysource_minimize._minimize import minimize_ast
-
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
+from pysource_minimize._minimize import minimize_ast
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
