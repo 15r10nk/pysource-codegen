@@ -1,10 +1,78 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
 name = "pysource-codegen"
-version = "0.5.2"
-description = ""
-authors = ["Your Name <you@example.com>"]
+version= "0.5.2"
+description = 'generate random python code to test linter/formatter/and other tools'
 readme = "README.md"
-packages = [{include = "pysource_codegen"}]
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Frank Hoffmann", email = "15r10nk-git@polarbit.de" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+"astunparse >=1.6.3; python_version<'3.9' ",
+"typing-extensions>=4.7.1"
+]
+
+[project.urls]
+Documentation = "https://github.com/15r10nk/pysource-codegen#readme"
+Issues = "https://github.com/15r10nk/pysource-codegen/issues"
+Source = "https://github.com/15r10nk/pysource-codegen"
+
+[tool.hatch.version]
+path = "src/pysource_codegen/__init__.py"
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies=[
+"rich>=12.0.0",
+"inline-snapshot>=0.4.0",
+"pysource-minimize>=0.5.0"
+]
+
+[[tool.hatch.envs.types.matrix]]
+python=["3.8","3.9","3.10","3.11","3.12"]
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+    "mypy>=1.0.0",
+    "rich>=12.0.0",
+    "inline-snapshot>=0.4.0",
+    "pysource-minimize>=0.5.0",
+    "pytest"
+]
+
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/pysource_codegen tests}"
+
+[tool.coverage.run]
+source_pkgs = ["pysource_codegen", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/pysource_codegen/__about__.py",
+]
+
+[tool.coverage.paths]
+pysource_codegen = ["src/pysource_codegen", "*/pysource-codegen/src/pysource_codegen"]
+tests = ["tests", "*/pysource-codegen/tests"]
+
+[tool.coverage.report]
+exclude_lines = ["assert False", "raise NotImplemented"]
 
 [tool.commitizen]
 changelog_incremental = true
@@ -12,43 +80,9 @@ major_version_zero = true
 tag_format = "v$major.$minor.$patch$prerelease"
 update_changelog_on_bump = true
 version_files = [
-  "pysource_codegen/__init__.py:version"
+  "src/pysource_codegen/__init__.py:__version__"
 ]
-version_provider = "poetry"
-
-[tool.poetry.scripts]
-pysource-codegen = "pysource_codegen.__main__:run"
-
-
-
-
-[tool.poetry.dependencies]
-python = ">=3.8"
-astunparse = { version =  ">=1.6.3", python ="<3.9"}
-#typed-ast = ">=1.5.5"
-typing-extensions = ">=4.7.1"
-
-[tool.poetry.group.dev.dependencies]
-rich = ">=12.0.0"
-pytest-xdist = {extras = ["psutil"], version = ">=3.2.1"}
-pytest = ">=7.2.1"
-mypy = ">=1.2.0"
-coverage-enable-subprocess = ">=1.0"
-inline-snapshot = ">=0.4.0"
-pysource-minimize = ">=0.5.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.coverage.run]
-source = ["tests","pysource_codegen"]
-parallel = true
-branch = true
-data_file = "$TOP/.coverage"
-
-[tool.coverage.report]
-exclude_lines = ["assert False", "raise NotImplemented"]
+version_provider = "pep621"
 
 [tool.mypy]
 exclude="tests/.*_samples"
