@@ -911,6 +911,15 @@ def fix(node, parents):
         if use() and node.args.kwarg:
             node.args.kwarg.annotation = None
 
+    if (
+        use()
+        and isinstance(node, ast.FormattedValue)
+        and isinstance(node.format_spec, ast.JoinedStr)
+    ):
+        for const in node.format_spec.values:
+            if isinstance(const, ast.Constant):
+                const.value = const.value.replace("{", "").replace("}", "")
+
     if sys.version_info >= (3, 12):
 
         # type scopes
