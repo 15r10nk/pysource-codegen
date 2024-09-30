@@ -183,14 +183,14 @@ class Invalid(Exception):
     pass
 
 
-def propability(parents, child_name):
+def probability(parents, child_name):
     try:
-        return propability_try(parents, child_name)
+        return probability_try(parents, child_name)
     except Invalid:
         return 0
 
 
-def propability_try(parents, child_name):
+def probability_try(parents, child_name):
     parent_types = [p[0] for p in parents]
 
     def inside(types, not_types=()):
@@ -1010,7 +1010,7 @@ def is_valid_ast(tree) -> bool:
         if (
             isinstance(node, (ast.AST))
             and parents
-            and propability(
+            and probability(
                 parents,
                 type_name,
             )
@@ -1021,7 +1021,7 @@ def is_valid_ast(tree) -> bool:
             print("node:", node)
 
             try:
-                propability_try(
+                probability_try(
                     parents,
                     node.__class__.__name__,
                 )
@@ -1560,7 +1560,7 @@ class AstGenerator:
 
         if isinstance(info, UnionNodeType):
             options_list = [
-                (option, propability(parents, option)) for option in info.options
+                (option, probability(parents, option)) for option in info.options
             ]
 
             invalid_option = [
@@ -1663,11 +1663,11 @@ def generate(
 
 # design targets:
 # * enumerate "all" possible ast-node combinations
-# * check if propability 0 would produce incorrect code
+# * check if probability 0 would produce incorrect code
 #   * the algo should be able to generate every possible syntax combination for every python version.
 # * hypothesis integration
 # * do not use compile() in the implementation
-# * generation should be customizable (custom propabilities and random values)
+# * generation should be customizable (custom probabilities and random values)
 
 # features:
 # * node-context: function-scope async-scope type-scope class-scope ...
