@@ -84,6 +84,7 @@ find_issue()
 
 ### cpython
 
+#### 3.12
 * https://github.com/python/cpython/issues/109219
 * https://github.com/python/cpython/issues/109823
 * https://github.com/python/cpython/issues/109719
@@ -91,10 +92,19 @@ find_issue()
 * https://github.com/python/cpython/issues/109219
 * https://github.com/python/cpython/issues/109118
 * https://github.com/python/cpython/issues/109114
+* https://github.com/python/cpython/issues/109889
+
+#### 3.13
+* https://github.com/python/cpython/issues/120367
+* https://github.com/python/cpython/issues/120225
+* https://github.com/python/cpython/issues/124746
+* https://github.com/python/cpython/issues/124871
 
 ## Todo:
 
 * [ ] refactor the existing code
+  * add better context information to `probability()`
+  * remove `fix()` function and move code into `probability()`
 * [ ] use probabilities for the ast-nodes from existing python code (use markov chains)
 * [x] support older python versions
 * [ ] allow to customize the probabilities to generate code to test specific language features
