@@ -480,6 +480,16 @@ def probability_try(parents, child_name):
         if child_name == "Await" and inside("AnnAssign.annotation"):
             raise Invalid
 
+    if sys.version_info >= (3, 14):
+        if child_name == "NamedExpr" and inside(
+            (
+                "arg.annotation",
+                "FunctionDef.returns",
+                "AsyncFunctionDef.returns",
+            )
+        ):
+            raise Invalid
+
     if child_name == "Expr":
         return 30
 
