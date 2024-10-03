@@ -6,7 +6,10 @@ from typing import Tuple
 from typing import Type
 from typing import Union
 
-from typing_extensions import Literal  # noqa
+try:
+    from typing import Literal  # noqa
+except ImportError:
+    from typing_extensions import Literal  # noqa
 
 
 @dataclass
