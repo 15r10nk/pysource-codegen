@@ -1,3 +1,35 @@
+## v0.6.0 (2024-10-09)
+
+### Feat
+
+- more variation in string constants
+- start to support 3.13
+
+### Fix
+
+- fixed typing
+- correct probability spelling
+- { and } are not allowed in formatspec, because they can not be escaped
+- asynchronous comprehension in TypeVar.bound
+- asynchronous comprehension outside of an asynchronous function
+- no async code in type annotations
+- the same varibale can be declared global multiple times
+- Starred expression inside ClassDef.bases
+- named expression cannot be used within a TypeVar bound
+- no async generators in type aliases
+- allow await in generator expressions
+- dict comprehension is a valid base class
+- named expression is a valid base class
+- allow SetComp in type-scope
+- lambda is valid inside annotations
+- made generator expressions valid inside class bases and type annotations
+- allow ListComp in type-scope
+- named-expressions inside list-comprehensions use the outside scope
+- restrict match value patterns
+- variable can not be nonlocal if it is declared global in the parent scope
+- count MatchStar variables as none usable global names
+- non default type params before type params with default values
+
 ## v0.5.2 (2024-04-23)
 
 ### Fix

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pysource-codegen"
-version= "0.5.2"
+version= "0.6.0"
 description = 'generate random python code to test linter/formatter/and other tools'
 readme = "README.md"
 requires-python = ">=3.8"
