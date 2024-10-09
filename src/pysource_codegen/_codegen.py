@@ -5,6 +5,7 @@ import inspect
 import itertools
 import re
 import sys
+import traceback
 from copy import deepcopy
 from typing import Any
 
@@ -74,7 +75,8 @@ def use():
     """
     this function is mocked in test_valid_source to ignore some decisions
     which are usually made by the algo.
-    The goal is to try to generate some valid source code which would otherwise not be generated.
+    The goal is to try to generate some valid source code which would otherwise not be generated,
+    becaus the algo falsely thinks it is invalid.
     """
     return True
 
@@ -177,7 +179,18 @@ def unique_by(l, key):
     return list({key(e): e for e in l}.values())
 
 
-def propability(parents, child_name):
+class Invalid(Exception):
+    pass
+
+
+def probability(parents, child_name):
+    try:
+        return probability_try(parents, child_name)
+    except Invalid:
+        return 0
+
+
+def probability_try(parents, child_name):
     parent_types = [p[0] for p in parents]
 
     def inside(types, not_types=()):
@@ -203,18 +216,18 @@ def propability(parents, child_name):
             ("Tuple", "elts"),
         ]
     ):
-        return 0
+        raise Invalid
 
     if child_name == "ExtSlice" and parents[-1] == ("ExtSlice", "dims"):
         # SystemError('extended slice invalid in nested slice')
-        return 0
+        raise Invalid
 
     # f-string
     if parents[-1] == ("JoinedStr", "values") and child_name not in (
         "Constant",
         "FormattedValue",
     ):
-        return 0
+        raise Invalid
 
     if 0:
         if (
@@ -223,27 +236,27 @@ def propability(parents, child_name):
             and child_name != "Constant"
         ):
             # TODO: WHY?
-            return 0
+            raise Invalid
 
     if parents[-1] == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
-        return 0
+        raise Invalid
 
     if (
         child_name == "JoinedStr"
         and parents.count(("FormattedValue", "format_spec")) > f_string_format_limit
     ):
-        return 0
+        raise Invalid
 
     if (
         child_name == "JoinedStr"
         and parents.count(("FormattedValue", "value")) > f_string_expr_limit
     ):
-        return 0
+        raise Invalid
 
     if child_name == "FormattedValue" and parents[-1][0] != "JoinedStr":
         # TODO: doc says this should be valid, maybe a bug in the python doc
         # see https://github.com/python/cpython/issues/111257
-        return 0
+        raise Invalid
 
     if inside(
         ("Delete.targets"), ("Subscript.value", "Subscript.slice", "Attribute.value")
@@ -254,7 +267,7 @@ def propability(parents, child_name):
         "List",
         "Tuple",
     ):
-        return 0
+        raise Invalid
 
     # function statements
     if child_name in (
@@ -264,12 +277,12 @@ def propability(parents, child_name):
     ) and not inside(
         ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"), ("ClassDef.body",)
     ):
-        return 0
+        raise Invalid
     # function statements
     if child_name in ("Nonlocal",) and not inside(
         ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body", "ClassDef.body")
     ):
-        return 0
+        raise Invalid
 
     if (
         not py38plus
@@ -279,22 +292,23 @@ def propability(parents, child_name):
             ("FunctionDef.body", "AsyncFunctionDef.body"),
         )
     ):
-        return 0
+        raise Invalid
 
     if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
         # TODO: find all allowed key types
-        return 0
+        raise Invalid
 
     if child_name == "MatchStar" and parent_types[-1] != "MatchSequence":
-        return 0
+        raise Invalid
 
     if child_name == "Starred" and parents[-1] not in (
         ("Tuple", "elts"),
         ("Call", "args"),
         ("List", "elts"),
         ("Set", "elts"),
+        ("ClassDef", "bases"),
     ):
-        return 0
+        raise Invalid
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
@@ -310,32 +324,33 @@ def propability(parents, child_name):
         ("comprehension", "target"),
     ]:
         if child_name not in assign_target:
-            return 0
+            raise Invalid
 
     if parents[-1] in [("AugAssign", "target"), ("AnnAssign", "target")]:
         if child_name in ("Starred", "List", "Tuple"):
-            return 0
+            raise Invalid
 
     if inside(("AnnAssign.target",)) and child_name == "Starred":
         # TODO this might be a cpython bug
-        return 0
+        raise Invalid
 
     if parents[-1] in [("AnnAssign", "target")]:
         if child_name not in ("Name", "Attribute", "Subscript"):
-            return 0
+            raise Invalid
 
     if parents[-1] in [("NamedExpr", "target")] and child_name != "Name":
-        return 0
+        raise Invalid
 
     in_async_code = inside(
-        "AsyncFunctionDef.body", ("FunctionDef.body", "Lambda.body", "ClassDef.body")
+        ("AsyncFunctionDef.body", "GeneratorExp.elt"),
+        ("FunctionDef.body", "Lambda.body", "ClassDef.body"),
     )
 
     if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
-        return 0
+        raise Invalid
 
     if child_name in ("YieldFrom",) and in_async_code:
-        return 0
+        raise Invalid
 
     in_loop = inside(
         ("For.body", "While.body", "AsyncFor.body"),
@@ -343,11 +358,11 @@ def propability(parents, child_name):
     )
 
     if child_name in ("Break", "Continue") and not in_loop:
-        return 0
+        raise Invalid
 
     if inside("TryStar.handlers") and child_name in ("Break", "Continue", "Return"):
         # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
-        return 0
+        raise Invalid
 
     if inside(("MatchValue",)) and child_name not in (
         "Attribute",
@@ -356,30 +371,37 @@ def propability(parents, child_name):
         "UnaryOp",
         "USub",
     ):
-        return 0
+        raise Invalid
+
+    if (
+        inside("MatchValue.value")
+        and inside("Attribute.value")
+        and child_name not in ("Attribute", "Name")
+    ):
+        raise Invalid
 
     if (
         inside(("MatchValue",))
         and inside(("UnaryOp",))
         and child_name in ("Name", "UnaryOp", "Attribute")
     ):
-        return 0
+        raise Invalid
 
     if parents[-1] == ("MatchValue", "value") and child_name == "Name":
-        return 0
+        raise Invalid
 
     if inside("MatchClass.cls"):
         if child_name not in ("Name", "Attribute"):
-            return 0
+            raise Invalid
 
     if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
-        return 0
+        raise Invalid
 
     if inside(
         ("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp")
     ) and child_name in ("Yield", "YieldFrom"):
         # SyntaxError: 'yield' inside list comprehension
-        return 0
+        raise Invalid
 
     if (
         inside(("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp"))
@@ -391,7 +413,7 @@ def propability(parents, child_name):
         and child_name == "NamedExpr"
     ):
         # SyntaxError: assignment expression within a comprehension cannot be used in a class body
-        return 0
+        raise Invalid
 
     if not py39plus and any(p[1] == "decorator_list" for p in parents):
         # restricted decorators
@@ -409,30 +431,30 @@ def propability(parents, child_name):
             return all(p == ("Attribute", "value") for p in parents)
 
         if valid_deco_parents(deco_parents) and child_name != "Name":
-            return 0
+            raise Invalid
 
     # type alias
     if py312plus:
         if parents[-1] == ("TypeAlias", "name") and child_name != "Name":
-            return 0
+            raise Invalid
 
         if (
             child_name == "Lambda"
             and inside("TypeAlias.value")
             and inside("ClassDef.body")
+            and sys.version_info < (3, 13)
         ):
             # SyntaxError('Cannot use lambda in annotation scope within class scope')
-            return 0
+            raise Invalid
 
         if child_name in (
-            "NamedExpr",
+            # "NamedExpr",
             "Yield",
             "YieldFrom",
             "Await",
-            "ListComp",
-            "DictComp",
-            "SetComp",
-            "GeneratorExp",
+            # "DictComp",
+            # "ListComp",
+            # "SetComp",
         ) and inside(
             (
                 "ClassDef.bases",
@@ -446,16 +468,23 @@ def propability(parents, child_name):
         ):
             # todo this should only be invalid in type scopes (when the class/def has type parameters)
             # and only for async comprehensions
-            return 0
+            raise Invalid
+
+        if child_name in ("NamedExpr",) and inside(
+            ("TypeAlias.value", "TypeVar.bound")
+        ):
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            raise Invalid
 
         if child_name == "Await" and inside("AnnAssign.annotation"):
-            return 0
+            raise Invalid
 
     if child_name == "Expr":
         return 30
 
     if child_name == "NonLocal" and parents[-1] == ("Module", "body"):
-        return 0
+        raise Invalid
 
     return 1
 
@@ -835,7 +864,14 @@ def fix(node, parents):
         if parent == "AsyncFunctionDef" and attr == "body":
             in_async_code = True
             break
-        if parent in ("FunctionDef", "Lambda", "ClassDef"):
+        if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
+            break
+
+        if (parent, attr) in (
+            ("arg", "annotation"),
+            ("AsyncFunctionDef", "returns"),
+            ("TypeVar", "bound"),
+        ):
             break
 
         if not py311plus and parent in (
@@ -875,9 +911,16 @@ def fix(node, parents):
         if use() and node.args.kwarg:
             node.args.kwarg.annotation = None
 
+    if (
+        use()
+        and isinstance(node, ast.FormattedValue)
+        and isinstance(node.format_spec, ast.JoinedStr)
+    ):
+        for const in node.format_spec.values:
+            if isinstance(const, ast.Constant):
+                const.value = const.value.replace("{", "").replace("}", "")
+
     if sys.version_info >= (3, 12):
-        if use() and isinstance(node, ast.Global):
-            node.names = unique_by(node.names, lambda e: e)
 
         # type scopes
         if use() and hasattr(node, "type_params"):
@@ -902,10 +945,10 @@ def fix(node, parents):
                         return self.generic_visit(node)
                     return self.visit(node.value)
 
-                def visit_Lambda(self, node: ast.Lambda) -> Any:
-                    if not use():
-                        return self.generic_visit(node)
-                    return self.visit(node.body)
+                # def visit_Lambda(self, node: ast.Lambda) -> Any:
+                #     if not use():
+                #         return self.generic_visit(node)
+                #     return self.visit(node.body)
 
             return Transformer().visit(annotation)
 
@@ -944,6 +987,16 @@ def fix(node, parents):
         if use() and isinstance(node, ast.AnnAssign):
             node.annotation = cleanup_annotation(node.annotation)
 
+    if sys.version_info >= (3, 13):
+        if hasattr(node, "type_params"):
+            # non-default type parameter 'name_1' follows default type parameter
+            no_default = False
+            for child in reversed(node.type_params):
+                if child.default_value != None:
+                    no_default = True
+                if use() and no_default:
+                    child.default_value = None
+
     return node
 
 
@@ -957,7 +1010,7 @@ def is_valid_ast(tree) -> bool:
         if (
             isinstance(node, (ast.AST))
             and parents
-            and propability(
+            and probability(
                 parents,
                 type_name,
             )
@@ -966,12 +1019,15 @@ def is_valid_ast(tree) -> bool:
             print("invalid node with:")
             print("parents:", parents)
             print("node:", node)
-            if 0:
-                breakpoint()
-                propability(
+
+            try:
+                probability_try(
                     parents,
                     node.__class__.__name__,
                 )
+            except Invalid:
+                frame = traceback.extract_tb(sys.exc_info()[2])[1]
+                print("file:", f"{frame.filename}:{frame.lineno}")
 
             return False
 
@@ -990,7 +1046,10 @@ def is_valid_ast(tree) -> bool:
                     value_info = get_info(attr_info[0])
                     if isinstance(value_info, UnionNodeType):
                         if type(value).__name__ not in value_info.options:
-                            print(f"{value} is not one type of {value_info.options}")
+                            print(
+                                f"{type(node).__name__}.{attr_name} {value} is not one type of {value_info.options}"
+                            )
+                            print("parents are:", parents)
                             return False
 
                 if isinstance(value, list) and len(value) < min_attr_length(
@@ -1066,6 +1125,8 @@ def is_valid_ast(tree) -> bool:
             dump = ast_dump(tree).splitlines()
             import difflib
 
+            print("ast was changed by during fixing:")
+
             print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
 
     return result
@@ -1093,7 +1154,7 @@ def fix_nonlocal(node):
         removes invalid Nonlocals from the class/function
         """
 
-        def __init__(self, locals, nonlocals, globals, type_params):
+        def __init__(self, locals, nonlocals, globals, type_params, parent_globals):
             self.locals = set(locals)
             self.used_names = set(locals)
             self.type_params = set(type_params)
@@ -1105,6 +1166,7 @@ def fix_nonlocal(node):
             # globals from the global scope
             self.globals = set(globals)
             self.used_globals = set()
+            self.parent_globals = parent_globals
 
         def name_assigned(self, name):
             self.locals.add(name)
@@ -1125,20 +1187,29 @@ def fix_nonlocal(node):
                 self.name_assigned(node.name)
                 return node
 
+        def search_walrus(self, node):
+            for n in ast.walk(node):
+                if isinstance(n, ast.NamedExpr):
+                    self.visit(n.target)
+
         def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_ListComp(self, node: ast.ListComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_DictComp(self, node: ast.DictComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_SetComp(self, node: ast.SetComp) -> Any:
             self.visit(node.generators[0].iter)
+            self.search_walrus(node)
             return node
 
         def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
@@ -1155,6 +1226,7 @@ def fix_nonlocal(node):
                 and name in self.nonlocals
                 and name not in self.used_names
                 and name not in self.type_params
+                and name not in self.parent_globals
                 and name not in self.used_globals
                 or name in ("__class__",)
             ]
@@ -1251,6 +1323,12 @@ def fix_nonlocal(node):
                     self.name_assigned(node.rest)
                 return self.generic_visit(node)
 
+        if sys.version_info >= (3, 13):
+
+            def visit_MatchStar(self, node: ast.MatchStar) -> Any:
+                self.name_assigned(node.name)
+                return self.generic_visit(node)
+
         def visit_ExceptHandler(self, handler):
             if handler.name:
                 self.name_assigned(handler.name)
@@ -1264,33 +1342,41 @@ def fix_nonlocal(node):
 
         if sys.version_info < (3, 13):
 
+            try_attrs = ("body", "orelse", "handlers", "finalbody")
+
             def visit_Try(self, node: ast.Try) -> Any:
                 # work around for https://github.com/python/cpython/issues/111123
-                args = {}
-                for k in ("body", "orelse", "handlers", "finalbody"):
-                    args[k] = [self.visit(x) for x in getattr(node, k)]
+                args = {
+                    k: [self.visit(x) for x in getattr(node, k)] for k in self.try_attrs
+                }
 
-                return ast.Try(**args)
+                assert set(self.try_attrs) == set(ast.Try._fields)
+
+                return ast.Try(**args)  # type: ignore
 
             if sys.version_info >= (3, 11):
 
                 def visit_TryStar(self, node: ast.TryStar) -> Any:
                     # work around for https://github.com/python/cpython/issues/111123
-                    args = {}
-                    for k in ("body", "orelse", "handlers", "finalbody"):
-                        args[k] = [self.visit(x) for x in getattr(node, k)]
+                    args = {
+                        k: [self.visit(x) for x in getattr(node, k)]
+                        for k in self.try_attrs
+                    }
 
-                    return ast.TryStar(**args)
+                    assert set(self.try_attrs) == set(ast.TryStar._fields)
+
+                    return ast.TryStar(**args)  # type: ignore
 
     class FunctionTransformer(ast.NodeTransformer):
         """
         - transformes a class/function
         """
 
-        def __init__(self, nonlocals, globals, type_params):
+        def __init__(self, nonlocals, globals, type_params, parent_globals):
             self.nonlocals = set(nonlocals)
             self.globals = set(globals)
             self.type_params = type_params
+            self.parent_globals = parent_globals
 
         def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
             return self.handle_function(node)
@@ -1307,10 +1393,14 @@ def fix_nonlocal(node):
             if sys.version_info >= (3, 12):
                 type_params |= {typ.name for typ in node.type_params}  # type: ignore
 
-            fixer = NonLocalFixer([], self.nonlocals, self.globals, type_params)
+            fixer = NonLocalFixer(
+                [], self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [fixer.visit(stmt) for stmt in node.body]
 
-            ft = FunctionTransformer(self.nonlocals, self.globals, type_params)
+            ft = FunctionTransformer(
+                self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [ft.visit(stmt) for stmt in node.body]
 
             return node
@@ -1322,20 +1412,25 @@ def fix_nonlocal(node):
             if sys.version_info >= (3, 12):
                 type_params |= {typ.name for typ in node.type_params}  # type: ignore
 
-            fixer = NonLocalFixer(names, self.nonlocals, self.globals, type_params)
+            fixer = NonLocalFixer(
+                names, self.nonlocals, self.globals, type_params, self.parent_globals
+            )
             node.body = [fixer.visit(stmt) for stmt in node.body]
 
             ft = FunctionTransformer(
-                fixer.locals | self.nonlocals, self.globals, type_params
+                fixer.locals | self.nonlocals,
+                self.globals,
+                type_params,
+                fixer.used_globals,
             )
             node.body = [ft.visit(stmt) for stmt in node.body]
 
             return node
 
-    fixer = NonLocalFixer([], [], [], [])
+    fixer = NonLocalFixer([], [], [], [], [])
     node = fixer.visit(node)
 
-    node = FunctionTransformer([], [], []).visit(node)
+    node = FunctionTransformer([], [], [], []).visit(node)
     return node
 
 
@@ -1472,7 +1567,7 @@ class AstGenerator:
 
         if isinstance(info, UnionNodeType):
             options_list = [
-                (option, propability(parents, option)) for option in info.options
+                (option, probability(parents, option)) for option in info.options
             ]
 
             invalid_option = [
@@ -1513,6 +1608,8 @@ class AstGenerator:
                         "some const text",
                         b"",
                         "",
+                        "'\"'''\"\"\"{}\\",
+                        b"'\"'''\"\"\"{}\\",
                         self.rand.randint(0, 20),
                         self.rand.uniform(0, 20),
                         True,
@@ -1573,11 +1670,11 @@ def generate(
 
 # design targets:
 # * enumerate "all" possible ast-node combinations
-# * check if propability 0 would produce incorrect code
+# * check if probability 0 would produce incorrect code
 #   * the algo should be able to generate every possible syntax combination for every python version.
 # * hypothesis integration
 # * do not use compile() in the implementation
-# * generation should be customizable (custom propabilities and random values)
+# * generation should be customizable (custom probabilities and random values)
 
 # features:
 # * node-context: function-scope async-scope type-scope class-scope ...

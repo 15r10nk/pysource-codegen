@@ -147,4 +147,4 @@
 
 ### Fix
 
-- changed propabilities to generate more expressions
+- changed probabilities to generate more expressions

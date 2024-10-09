@@ -65,14 +65,15 @@ def test_invalid_ast(file):
 def x_test_example():
     seed = 2273381
     tree = generate_ast(seed)
+    tree = generate_ast(seed, depth_limit=9)
     # print(ast.dump(tree, indent=2))
     assert is_valid_ast(tree)
 
 
 def generate_invalid_ast(seed):
-    print("seed=", seed)
+    print("seed =", seed)
 
-    tree = generate_ast(seed)
+    tree = generate_ast(seed, depth_limit=9)
     try:
         assert is_valid_ast(tree)
     except:
@@ -95,7 +96,7 @@ def generate_invalid_ast(seed):
             new_tree = minimize_ast(tree, checker)
         except:
             print(f"error happend while minimize_ast seed={seed}")
-            ast_dump(last_checked_tree)
+            print(ast_dump(last_checked_tree))
             raise
 
         print(
