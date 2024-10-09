@@ -1342,23 +1342,30 @@ def fix_nonlocal(node):
 
         if sys.version_info < (3, 13):
 
+            try_attrs = ("body", "orelse", "handlers", "finalbody")
+
             def visit_Try(self, node: ast.Try) -> Any:
                 # work around for https://github.com/python/cpython/issues/111123
-                args = {}
-                for k in ("body", "orelse", "handlers", "finalbody"):
-                    args[k] = [self.visit(x) for x in getattr(node, k)]
+                args = {
+                    k: [self.visit(x) for x in getattr(node, k)] for k in self.try_attrs
+                }
 
-                return ast.Try(**args)
+                assert set(self.try_attrs) == set(ast.Try._fields)
+
+                return ast.Try(**args)  # type: ignore
 
             if sys.version_info >= (3, 11):
 
                 def visit_TryStar(self, node: ast.TryStar) -> Any:
                     # work around for https://github.com/python/cpython/issues/111123
-                    args = {}
-                    for k in ("body", "orelse", "handlers", "finalbody"):
-                        args[k] = [self.visit(x) for x in getattr(node, k)]
+                    args = {
+                        k: [self.visit(x) for x in getattr(node, k)]
+                        for k in self.try_attrs
+                    }
 
-                    return ast.TryStar(**args)
+                    assert set(self.try_attrs) == set(ast.TryStar._fields)
+
+                    return ast.TryStar(**args)  # type: ignore
 
     class FunctionTransformer(ast.NodeTransformer):
         """
