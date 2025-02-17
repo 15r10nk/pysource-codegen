@@ -2,10 +2,12 @@ import ast
 import hashlib
 import sys
 import textwrap
+import unittest
 import warnings
 from pathlib import Path
 
-import pytest
+sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
+
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
@@ -31,35 +33,41 @@ def does_compile(tree: ast.Module):
             compile(source, "<file>", "exec")
             compile(ast.fix_missing_locations(tree), "<file>", "exec")
     except Exception as e:
-        print(e)
+        # print(e)
         return False
     return True
 
 
-@pytest.mark.parametrize(
-    "file", [pytest.param(f, id=f.stem[:12]) for f in sample_dir.glob("*.py")]
-)
-def test_invalid_ast(file):
-    code = file.read_text()
-    print(code)
-    globals = {}
-    try:
-        exec(code, globals)
-    except (NameError, ImportError) as e:
-        pytest.skip(f"wrong python version {e}")
+class TestInvalidAst(unittest.TestCase):
+    pass
 
-    tree = globals["tree"]
 
-    for node in ast.walk(tree):
-        for field in node._fields:
-            if not hasattr(node, field):
-                pytest.skip(
-                    f"wrong python version {node.__class__.__name__} is missing .{field}"
-                )
-        if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
-            pytest.skip(f"ast.Constant can not be unparsed on python3.7")
+def gen_test(name, file):
+    def test_invalid_ast(self):
+        code = file.read_text()
+        globals = {}
+        try:
+            exec(code, globals)
+        except (NameError, ImportError) as e:
 
-    assert is_valid_ast(tree) == does_compile(tree)
+            return  # pytest.skip(f"wrong python version {e}")
+
+        tree = globals["tree"]
+
+        for node in ast.walk(tree):
+            for field in node._fields:
+                if not hasattr(node, field):
+                    return  # pytest.skip( f"wrong python version {node.__class__.__name__} is missing .{field}")
+            if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
+                return  # pytest.skip(f"ast.Constant can not be unparsed on python3.7")
+
+        self.assertEqual(is_valid_ast(tree), does_compile(tree), msg=code)
+
+    setattr(TestInvalidAst, "test_invalid_ast_" + name, test_invalid_ast)
+
+
+for file in sample_dir.glob("*.py"):
+    gen_test(file.stem, file)
 
 
 def x_test_example():
@@ -124,3 +132,9 @@ def generate_invalid_ast(seed):
         else:
             assert False
     return False
+
+
+if __name__ == "__main__":
+    for i in range(0, 1000):
+        if generate_invalid_ast(i):
+            break

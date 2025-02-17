@@ -1,9 +1,12 @@
 import ast
 import hashlib
+import sys
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
+
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
@@ -15,29 +18,32 @@ sample_dir = Path(__file__).parent / "valid_source_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-@pytest.mark.parametrize(
-    "file", [pytest.param(f, id=f.stem[:12]) for f in sample_dir.glob("*.py")]
-)
-def test_valid_source(file):
-    code = file.read_text()
+class TestValidSource(unittest.TestCase):
+    pass
 
-    try:
-        tree = ast.parse(code)
-    except:
-        return
 
-    if not does_compile(tree):
-        print("the following code is invalid:\n")
-        print(code)
-        print()
-        assert not is_valid_ast(tree)
-        return
+def gen_test(name, file):
+    def test_valid_source(self):
+        code = file.read_text()
 
-    print("the following code is valid:\n")
-    print(code)
-    print()
+        try:
+            tree = ast.parse(code)
+        except:
+            return
 
-    assert is_valid_ast(tree)
+        if not does_compile(tree):
+            self.assertFalse(
+                is_valid_ast(tree), msg="the following code is invalid:\n" + code
+            )
+            return
+
+        self.assertTrue(is_valid_ast(tree), msg="the following code is valid:\n" + code)
+
+    setattr(TestValidSource, "test_valid_source_" + name, test_valid_source)
+
+
+for file in sample_dir.glob("*.py"):
+    gen_test(file.stem, file)
 
 
 def minimize_if_valid(code):

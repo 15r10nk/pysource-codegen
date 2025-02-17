@@ -1129,7 +1129,7 @@ def is_valid_ast(tree) -> bool:
 
     result = equal_ast(tree_copy, tree, dump_info=True)
 
-    if 1:
+    if 0:
         if sys.version_info >= (3, 9) and not result:
             dump_copy = ast_dump(tree_copy).splitlines()
             dump = ast_dump(tree).splitlines()
