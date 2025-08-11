@@ -27,7 +27,7 @@ pysource-codegen --seed 42
 
 or as a library:
 
-``` python
+```python
 from pysource_codegen import generate
 
 seed = 42
@@ -38,7 +38,7 @@ You might find [pysource-minimize](https://github.com/15r10nk/pysource-minimize)
 to reduce the generated code which triggers your bug down to a minimal code snipped,
 which can be used to fix the issue.
 
-``` python
+```python
 from pysource_codegen import generate
 from pysource_minimize import minimize
 
