@@ -25,6 +25,8 @@ py312plus = (3, 12) <= sys.version_info
 
 type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
 
+comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
+
 
 def all_args(args):
     if py38plus:
@@ -397,14 +399,12 @@ def probability_try(parents, child_name):
     if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
         raise Invalid
 
-    if inside(
-        ("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp")
-    ) and child_name in ("Yield", "YieldFrom"):
+    if inside(comprehensions) and child_name in ("Yield", "YieldFrom"):
         # SyntaxError: 'yield' inside list comprehension
         raise Invalid
 
     if (
-        inside(("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp"))
+        inside(comprehensions)
         # TODO restrict to comprehension inside ClassDef
         and inside(
             "ClassDef.body",
@@ -478,6 +478,18 @@ def probability_try(parents, child_name):
             raise Invalid
 
         if child_name == "Await" and inside("AnnAssign.annotation"):
+            raise Invalid
+
+        if sys.version_info < (3, 13):
+            type_alias_context = ("AsyncFunctionDef", "ClassDef")
+        else:
+            type_alias_context = ("AsyncFunctionDef",)
+
+        if (
+            inside(("TypeAlias", "AnnAssign.annotation"))
+            and inside(type_alias_context)
+            and child_name in comprehensions
+        ):
             raise Invalid
 
     if sys.version_info >= (3, 14):
@@ -884,12 +896,7 @@ def fix(node, parents):
         ):
             break
 
-        if not py311plus and parent in (
-            "ListComp",
-            "DictComp",
-            "SetComp",
-            "GeneratorExp",
-        ):
+        if not py311plus and parent in comprehensions:
             break
 
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
@@ -1051,6 +1058,7 @@ def is_valid_ast(tree) -> bool:
             assert isinstance(info, NodeType)
 
             for attr_name, value in ast.iter_fields(node):
+                assert attr_name in info.fields, f"{attr_name} missing in {info}"
                 attr_info = info.fields[attr_name]
                 if attr_info[1] == "":
                     value_info = get_info(attr_info[0])

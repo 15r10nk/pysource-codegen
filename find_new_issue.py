@@ -1,7 +1,10 @@
+from random import randint
+
 from tests.test_invalid_ast import generate_invalid_ast
 
 if __name__ == "__main__":
-    for i in range(0, 1000):
+    while True:
+        i = randint(0, 10000000000)
         if generate_invalid_ast(i):
             break
         # TODO: search later for more valid source codes

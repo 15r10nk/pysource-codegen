@@ -18,33 +18,43 @@ sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def does_compile(tree: ast.Module):
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BoolOp) and len(node.values) < 2:
-            return False
-        if not isinstance(node, ast.JoinedStr) and any(
-            isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
-        ):
-            return False
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)
-            source = unparse(tree)
-            compile(source, "<file>", "exec")
-            compile(ast.fix_missing_locations(tree), "<file>", "exec")
-    except Exception as e:
-        # print(e)
-        return False
-    return True
-
-
 class TestInvalidAst(unittest.TestCase):
-    pass
+
+    def setUp(self):
+        self.details = []
+        super().setUp()
+
+    def addDetail(self, text):
+        if hasattr(self, "details"):
+            self.details.append(text)
+
+    def does_compile(self, tree: ast.Module):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+                return False
+            if not isinstance(node, ast.JoinedStr) and any(
+                isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
+            ):
+                return False
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                source = unparse(tree)
+                compile(source, "<file>", "exec")
+                compile(ast.fix_missing_locations(tree), "<file>", "exec")
+        except Exception as e:
+            self.addDetail("exception during `compile(ast.unparse(tree))`:\n" + str(e))
+            return False
+        return True
+
+
+does_compile = TestInvalidAst().does_compile
 
 
 def gen_test(name, file):
     def test_invalid_ast(self):
         code = file.read_text()
+        self.addDetail("code:\n```\n" + code + "\n```")
         globals = {}
         try:
             exec(code, globals)
@@ -61,9 +71,13 @@ def gen_test(name, file):
             if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
                 return  # pytest.skip(f"ast.Constant can not be unparsed on python3.7")
 
-        self.assertEqual(is_valid_ast(tree), does_compile(tree), msg=code)
+        self.assertEqual(
+            is_valid_ast(tree),
+            self.does_compile(tree),
+            msg="detailed info:\n" + "\n\n".join(self.details),
+        )
 
-    setattr(TestInvalidAst, "test_invalid_ast_" + name, test_invalid_ast)
+    setattr(TestInvalidAst, "test_" + name, test_invalid_ast)
 
 
 for file in sample_dir.glob("*.py"):
