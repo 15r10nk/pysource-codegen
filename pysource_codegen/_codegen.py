@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import ast
-import inspect
 import itertools
-import re
 import sys
 import traceback
 from copy import deepcopy
@@ -13,6 +11,7 @@ from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
 from ._utils import ast_dump
 from ._utils import unparse
+from .ast_info import get_info
 from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
@@ -22,8 +21,6 @@ py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
-
-type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
 
 comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
@@ -83,86 +80,30 @@ def use():
     return True
 
 
-def equal_ast(lhs, rhs, dump_info=False, t="root"):
+def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
     if type(lhs) != type(rhs):
-        if dump_info:
-            print(t, lhs, "!=", rhs)
+        print(t, lhs, "!=", rhs)
         return False
 
     elif isinstance(lhs, list):
         if len(lhs) != len(rhs):
-            if dump_info:
-                print(t, lhs, "!=", rhs)
+            print(t, lhs, "!=", rhs)
             return False
 
         return all(
-            equal_ast(l, r, dump_info, t + f"[{i}]")
+            equal_ast(l, r, print, t + f"[{i}]")
             for i, (l, r) in enumerate(zip(lhs, rhs))
         )
 
     elif isinstance(lhs, ast.AST):
         return all(
-            equal_ast(
-                getattr(lhs, field), getattr(rhs, field), dump_info, t + f".{field}"
-            )
+            equal_ast(getattr(lhs, field), getattr(rhs, field), print, t + f".{field}")
             for field in lhs._fields
         )
     else:
-        if dump_info and lhs != rhs:
+        if lhs != rhs:
             print(t, lhs, "!=", rhs)
         return lhs == rhs
-
-
-def get_info(name):
-    if name in type_infos:
-        return type_infos[name]
-    elif name in ("identifier", "int", "string", "constant"):
-        type_infos[name] = BuiltinNodeType(name)
-
-    else:
-        doc = inspect.getdoc(getattr(ast, name)) or ""
-        doc = doc.replace("\n", " ")
-
-        if doc:
-            m = re.fullmatch(r"(\w*)", doc)
-            if m:
-                nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                name = m.group(1)
-                type_infos[name] = nt
-            else:
-                m = re.fullmatch(r"(\w*)\((.*)\)", doc)
-                if m:
-                    nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                    name = m.group(1)
-                    type_infos[name] = nt
-                    for string_field in m.group(2).split(","):
-                        field_type, field_name = string_field.split()
-                        quantity = ""
-                        last = field_type[-1]
-                        if last in "*?":
-                            quantity = last
-                            field_type = field_type[:-1]
-
-                        nt.fields[field_name] = (field_type, quantity)
-                        get_info(field_type)
-                elif doc.startswith(f"{name} = "):
-                    doc = doc.split(" = ", 1)[1]
-                    nt = UnionNodeType(options=[])
-                    type_infos[name] = nt
-                    nt.options = [d.split("(")[0] for d in doc.split(" | ")]
-                    for o in nt.options:
-                        get_info(o)
-
-                else:
-                    assert False, "can not parse:" + doc
-        else:
-            assert False, "no doc for " + name
-
-    return type_infos[name]
-
-
-if sys.version_info < (3, 9):
-    from .static_type_info import type_infos  # type: ignore
 
 
 import random
@@ -1021,7 +962,7 @@ def fix_result(node):
     return fix_nonlocal(node)
 
 
-def is_valid_ast(tree) -> bool:
+def is_valid_ast(tree, print=lambda *l: None) -> bool:
     def is_valid(node: ast.AST, parents):
         type_name = node.__class__.__name__
         if (
@@ -1076,8 +1017,8 @@ def is_valid_ast(tree) -> bool:
                     print("invalid arg length", type_name, attr_name)
                     return False
 
-                if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
-                    print("no list", value)
+                if isinstance(value, list) != ("*" in info.fields[attr_name][1]):
+                    print(f"no list (info {info.fields[attr_name]})")
                     return False
                 if value is None:
                     if not (
@@ -1135,7 +1076,7 @@ def is_valid_ast(tree) -> bool:
     tree_copy = fix_tree(tree_copy, [])
     tree_copy = fix_result(tree_copy)
 
-    result = equal_ast(tree_copy, tree, dump_info=True)
+    result = equal_ast(tree_copy, tree, print)
 
     if 0:
         if sys.version_info >= (3, 9) and not result:

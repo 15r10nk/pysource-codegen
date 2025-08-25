@@ -1,7 +1,6 @@
 import ast
 import hashlib
 import sys
-import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,8 +16,10 @@ from .test_invalid_ast import does_compile
 sample_dir = Path(__file__).parent / "valid_source_samples"
 sample_dir.mkdir(exist_ok=True)
 
+from .TestBase import TestBase
 
-class TestValidSource(unittest.TestCase):
+
+class TestValidSource(TestBase):
     pass
 
 
@@ -32,12 +33,13 @@ def gen_test(name, file):
             return
 
         if not does_compile(tree):
-            self.assertFalse(
-                is_valid_ast(tree), msg="the following code is invalid:\n" + code
-            )
+            self.addDetail("the following code should be invalid:\n" + code)
+            self.assertFalse(is_valid_ast(tree, self.addDetail), msg=self.message())
             return
 
-        self.assertTrue(is_valid_ast(tree), msg="the following code is valid:\n" + code)
+        self.addDetail("the following code should be valid:\n" + code)
+
+        self.assertTrue(is_valid_ast(tree, self.addDetail), msg=self.message())
 
     setattr(TestValidSource, "test_valid_source_" + name, test_valid_source)
 

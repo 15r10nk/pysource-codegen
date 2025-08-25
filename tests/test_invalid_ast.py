@@ -2,7 +2,6 @@ import ast
 import hashlib
 import sys
 import textwrap
-import unittest
 import warnings
 from pathlib import Path
 
@@ -13,12 +12,13 @@ from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
 from pysource_minimize._minimize import minimize_ast
+from .TestBase import TestBase
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-class TestInvalidAst(unittest.TestCase):
+class TestInvalidAst(TestBase):
 
     def setUp(self):
         self.details = []
@@ -74,7 +74,7 @@ def gen_test(name, file):
         self.assertEqual(
             is_valid_ast(tree),
             self.does_compile(tree),
-            msg="detailed info:\n" + "\n\n".join(self.details),
+            msg=self.message(),
         )
 
     setattr(TestInvalidAst, "test_" + name, test_invalid_ast)
