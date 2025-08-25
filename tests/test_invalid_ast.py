@@ -97,10 +97,13 @@ def generate_invalid_ast(seed):
 
     tree = generate_ast(seed, depth_limit=9)
     try:
-        assert is_valid_ast(tree)
+        assert is_valid_ast(tree, print)
     except:
-        print(f"error for is_valid_ast seed={seed}")
-        raise
+        print(f"The generated tree is not valid ({seed=}).")
+        print(
+            f"The validity is checked with the generator code which shows a problem in the generation/checking."
+        )
+        return True
 
     if not does_compile(tree):
         last_checked_tree = tree

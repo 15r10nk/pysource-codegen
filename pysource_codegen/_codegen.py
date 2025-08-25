@@ -24,6 +24,10 @@ py312plus = (3, 12) <= sys.version_info
 
 comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
+InterpolationOrFormattedValue = (ast.FormattedValue,)
+if sys.version_info >= (3, 14):
+    InterpolationOrFormattedValue += (ast.Interpolation,)
+
 
 def all_args(args):
     if py38plus:
@@ -42,6 +46,12 @@ def walk_until(node, stop):
         return
     for child in ast.iter_child_nodes(node):
         yield from walk_until(child, stop)
+
+
+def walk_childs_first(node):
+    for e in ast.iter_child_nodes(node):
+        yield from walk_childs_first(e)
+        yield e
 
 
 def walk_function_nodes(node):
@@ -443,6 +453,21 @@ def probability_try(parents, child_name):
         ):
             raise Invalid
 
+        if not parent_types[-1] == "TemplateStr" and child_name == "Interpolation":
+            raise Invalid
+
+        if parents[-1] == ("TemplateStr", "values") and child_name not in (
+            "Interpolation",
+            "Constant",
+        ):
+            raise Invalid
+
+        if (
+            parents[-1] == ("Interpolation", "format_spec")
+            and child_name != "JoinedStr"
+        ):
+            raise Invalid
+
     if child_name == "Expr":
         return 30
 
@@ -502,13 +527,16 @@ def fix(node, parents):
         if (
             use()
             and parents
-            and parents[-1] == ("JoinedStr", "values")
+            and (
+                parents[-1] == ("JoinedStr", "values")
+                or parents[-1] == ("TemplateStr", "values")
+            )
             and not isinstance(node.value, str)
         ):
             # TODO: better format string generation
             node.value = str(node.value)
 
-    if isinstance(node, ast.FormattedValue):
+    if isinstance(node, InterpolationOrFormattedValue):
         valid_conversion = (-1, 115, 114, 97)
         if use() and not py310plus and node.conversion is None:
             node.conversion = 5
@@ -871,7 +899,7 @@ def fix(node, parents):
 
     if (
         use()
-        and isinstance(node, ast.FormattedValue)
+        and isinstance(node, InterpolationOrFormattedValue)
         and isinstance(node.format_spec, ast.JoinedStr)
     ):
         for const in node.format_spec.values:
@@ -955,10 +983,30 @@ def fix(node, parents):
                 if use() and no_default:
                     child.default_value = None
 
+    if sys.version_info >= (3, 14):
+        if (
+            use()
+            and isinstance(node, ast.Interpolation)
+            and isinstance(node.value, ast.Constant)
+        ):
+            node.value.value = str(node.value.value)
+
     return node
 
 
 def fix_result(node):
+    if sys.version_info >= (3, 14):
+        for n in walk_childs_first(node):
+            if use() and isinstance(n, ast.Interpolation):
+                f_str = ast.JoinedStr(
+                    [ast.FormattedValue(value=n.value, conversion=-1, format_spec=None)]
+                )
+                f_str_repr = ast.unparse(f_str)
+                if f_str_repr.startswith(("f'''", 'f"""')):
+                    n.str = ast.unparse(f_str)[5:-4]  # strip f"""{...}"""
+                else:
+                    n.str = ast.unparse(f_str)[3:-2]  # strip f"{...}"
+
     return fix_nonlocal(node)
 
 
@@ -1046,8 +1094,6 @@ def is_valid_ast(tree, print=lambda *l: None) -> bool:
     if not is_valid(tree, []):
         return False
 
-    tree_copy = deepcopy(tree)
-
     def fix_tree(node: ast.AST, parents):
         for field in node._fields:
             value = getattr(node, field)
@@ -1073,22 +1119,34 @@ def is_valid_ast(tree, print=lambda *l: None) -> bool:
 
         return fix(node, parents)
 
-    tree_copy = fix_tree(tree_copy, [])
-    tree_copy = fix_result(tree_copy)
+    def check_if_changed(tree, tree_copy, operation):
+        result = equal_ast(tree_copy, tree, print)
 
-    result = equal_ast(tree_copy, tree, print)
-
-    if 0:
         if sys.version_info >= (3, 9) and not result:
-            dump_copy = ast_dump(tree_copy).splitlines()
             dump = ast_dump(tree).splitlines()
+            dump_copy = ast_dump(tree_copy).splitlines()
             import difflib
 
-            print("ast was changed by during fixing:")
+            print(f"ast was changed while running {operation}:")
 
-            print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
+            print(
+                "\n".join(
+                    difflib.unified_diff(dump, dump_copy, "original", "fixed", n=10)
+                )
+            )
+        return result
 
-    return result
+    tree_copy = deepcopy(tree)
+
+    tree_copy = fix_tree(tree_copy, [])
+    if not check_if_changed(tree, tree_copy, "fix_tree"):
+        return False
+
+    tree_copy = fix_result(tree_copy)
+    if not check_if_changed(tree, tree_copy, "fix_result"):
+        return False
+
+    return True
 
 
 def arguments(
@@ -1512,8 +1570,18 @@ class AstGenerator:
                         if not none_allowed(parents) or self.cnd()
                         else None
                     )
+                elif q == "?*":
+                    return [
+                        (
+                            self.generate_impl(t, parents, depth)
+                            if not none_allowed(parents) or self.cnd()
+                            else None
+                        )
+                        for _ in range(attr_length(parents[-1][0], n))
+                    ]
+
                 else:
-                    assert False
+                    assert False, q
 
             attributes = {
                 n: child_node(n, t, q, [*parents, (name, n)])

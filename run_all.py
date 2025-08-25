@@ -4,6 +4,7 @@
 #   "rich",
 # ]
 # ///
+import concurrent.futures
 import json
 import re
 import subprocess
@@ -83,15 +84,14 @@ versions = sorted(
     [v for v in filtered_versions if version_tuple(v) >= (3, 8)], key=version_tuple
 )
 
-results = {}
 
-
-for version in versions:
+def run_test(version):
     result = subprocess.run(
         ["uvx", "-p", version, "--with-editable=.", "python", "-m", "unittest", "-v"],
         capture_output=True,
         text=True,
     )
+    fail_cmds = []
     for line in result.stderr.splitlines():
         if line.startswith("FAIL: "):
             # Example line: FAIL: test_func (module.Class)
@@ -101,9 +101,20 @@ for version in versions:
             if not module_class.endswith(test_func):
                 module_class += "." + test_func
 
-            print(f"uvx -p {version} python -m unittest {module_class}")
-    results[version] = result.returncode
+            fail_cmds.append(f"uvx -p {version} python -m unittest {module_class}")
+    return version, result.returncode, fail_cmds
 
+
+results = {}
+fail_commands = []
+
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    futures = {executor.submit(run_test, version): version for version in versions}
+    for future in concurrent.futures.as_completed(futures):
+        version, returncode, fail_cmds = future.result()
+        results[version] = returncode
+        for cmd in fail_cmds:
+            print(cmd)
 
 # results={'3.9.10': 0, '3.11.3': 0, '3.13.4': 0, '3.10.17': 0, '3.11.8': 0, '3.10.16': 0, '3.12.4': 1, '3.8.11': 0, '3.10.0': 0, '3.9.22': 0, '3.12.2': 1, '3.13.3': 0, '3.8.9': 0, '3.11.11': 0, '3.10.15': 0, '3.9.4': 0, '3.8.14': 0, '3.8.20': 0, '3.12.7': 1, '3.9.12': 0, '3.9.16': 0, '3.11.13': 0, '3.9.7': 0, '3.9.15': 0, '3.12.5': 1, '3.12.11': 1, '3.8.19': 0, '3.10.14': 0, '3.10.4': 0, '3.9.5': 0, '3.9.21': 0, '3.9.0': 1, '3.11.1': 0, '3.10.9': 0, '3.9.17': 0, '3.12.6': 1, '3.10.2': 0, '3.11.4': 0, '3.13.0': 0, '3.12.1': 1, '3.11.12': 0, '3.10.8': 0, '3.8.3': 0, '3.9.6': 0, '3.9.18': 0, '3.10.13': 0, '3.8.15': 0, '3.9.13': 0, '3.11.6': 0, '3.8.12': 0, '3.11.2': 0, '3.13.1': 0, '3.8.13': 0, '3.8.2': 0, '3.8.18': 0, '3.9.11': 0, '3.12.3': 1, '3.8.5': 0, '3.8.10': 0, '3.12.8': 1, '3.13.2': 0, '3.8.16': 0, '3.10.11': 0, '3.7.9': 1, '3.9.1': 1, '3.8.17': 0, '3.10.6': 0, '3.13.6': 0, '3.10.5': 0, '3.10.7': 0, '3.11.9': 0, '3.9.19': 0, '3.12.10': 1, '3.8.8': 0, '3.13.5': 0, '3.9.20': 0, '3.9.14': 0, '3.12.9': 1, '3.8.7': 0, '3.12.0': 1, '3.8.6': 0, '3.10.18': 0, '3.11.7': 0, '3.11.5': 0, '3.10.12': 0, '3.9.3': 0, '3.10.3': 0, '3.11.10': 0, '3.9.23': 0, '3.9.2': 1}
 
