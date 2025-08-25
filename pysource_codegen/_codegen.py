@@ -1478,7 +1478,7 @@ def min_attr_length(node_type, attr_name):
         return 1
     if node_type == "ExtSlice" and attr_name == "dims":
         return 1
-    if sys.version_info < (3, 9) and node_type == "Set" and attr_name == "elts":
+    if sys.version_info < (3, 9, 3) and node_type == "Set" and attr_name == "elts":
         return 1
     if node_type == "Compare" and attr_name in ("ops", "comparators"):
         return 1
