@@ -7,11 +7,6 @@ from typing import Tuple
 from typing import Type
 from typing import Union
 
-try:
-    from typing import Literal  # noqa
-except ImportError:
-    from typing_extensions import Literal  # noqa
-
 
 @dataclass
 class NodeType:

@@ -477,7 +477,7 @@ def probability_try(parents, child_name):
     return 1
 
 
-def fix(node, parents):
+def fix(node: ast.AST, parents: list[tuple[str, str]]):
     if isinstance(node, ast.ImportFrom):
         if use() and not py310plus and node.level is None:
             node.level = 0
@@ -497,7 +497,7 @@ def fix(node, parents):
         # a[(a:b,*c)] <- not valid
         # TODO check this
         found = False
-        new_elts = []
+        new_elts: list[ast.expr] = []
         # allow only the first Slice or Starred
         for e in node.elts:
             if isinstance(e, (ast.Starred, ast.Slice)):
@@ -685,6 +685,7 @@ def fix(node, parents):
             isinstance(node, ast.MatchValue)
             and isinstance(node.value, ast.Constant)
             and any(node.value.value is v for v in (None, True, False))
+            and isinstance(node.value.value, (type(None), bool))
         ):
             return ast.MatchSingleton(value=node.value.value)
 
@@ -694,7 +695,7 @@ def fix(node, parents):
             return ast.MatchValue(value=ast.Constant(value=node.value))
 
         # @lambda f:lambda pattern:set(f(pattern))
-        def names(node):
+        def all_names(node):
             if isinstance(node, ast.MatchAs) and node.name:
                 yield node.name
             elif isinstance(node, ast.MatchStar) and node.name:
@@ -703,11 +704,11 @@ def fix(node, parents):
                 yield node.rest
             elif isinstance(node, ast.MatchOr):
                 yield from set.intersection(
-                    *[set(names(pattern)) for pattern in node.patterns]
+                    *[set(all_names(pattern)) for pattern in node.patterns]
                 )
             else:
                 for child in ast.iter_child_nodes(node):
-                    yield from names(child)
+                    yield from all_names(child)
 
         class RemoveName(ast.NodeVisitor):
             def __init__(self, condition):
@@ -764,7 +765,7 @@ def fix(node, parents):
 
             def visit_MatchOr(self, node: ast.MatchOr):
                 allowed = set.intersection(
-                    *[set(names(pattern)) for pattern in node.patterns]
+                    *[set(all_names(pattern)) for pattern in node.patterns]
                 )
                 allowed -= self.used
 
@@ -797,11 +798,11 @@ def fix(node, parents):
             seen = set()
             for pattern in node.patterns:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.MatchOr):
             var_names = set.intersection(
-                *[set(names(pattern)) for pattern in node.patterns]
+                *[set(all_names(pattern)) for pattern in node.patterns]
             )
 
             RemoveName(lambda name: name not in var_names).visit(node)
@@ -834,7 +835,7 @@ def fix(node, parents):
             seen = set()
             for pattern in node.patterns:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.MatchClass):
             node.kwd_attrs = unique_by(node.kwd_attrs, lambda e: e)
@@ -843,7 +844,7 @@ def fix(node, parents):
             seen = set()
             for pattern in [*node.patterns, *node.kwd_patterns]:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.Match):
             node = RemoveNameCleanup().visit(node)
@@ -904,6 +905,7 @@ def fix(node, parents):
     ):
         for const in node.format_spec.values:
             if isinstance(const, ast.Constant):
+                assert isinstance(const.value, str)
                 const.value = const.value.replace("{", "").replace("}", "")
 
     if sys.version_info >= (3, 12):

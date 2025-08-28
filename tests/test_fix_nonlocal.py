@@ -8,7 +8,7 @@ try:
     from inline_snapshot import snapshot
 except:
 
-    def snapshot(x):
+    def snapshot(x):  # type: ignore
         return x
 
 
