@@ -1,3 +1,9 @@
+## v0.7.1 (2025-08-29)
+
+### Fix
+
+- added entry point for pysource-codegen
+
 ## v0.7.0 (2025-08-29)
 
 ### Feat
