@@ -2,11 +2,10 @@ import ast
 from dataclasses import dataclass
 from typing import Dict
 from typing import List
+from typing import Literal
 from typing import Tuple
 from typing import Type
 from typing import Union
-
-from typing_extensions import Literal  # noqa
 
 
 @dataclass

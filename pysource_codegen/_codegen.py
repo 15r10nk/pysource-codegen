@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import ast
-import inspect
 import itertools
-import re
 import sys
 import traceback
 from copy import deepcopy
@@ -13,6 +11,7 @@ from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
 from ._utils import ast_dump
 from ._utils import unparse
+from .ast_info import get_info
 from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
@@ -23,7 +22,11 @@ py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
 
-type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
+comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
+
+InterpolationOrFormattedValue = (ast.FormattedValue,)
+if sys.version_info >= (3, 14):
+    InterpolationOrFormattedValue += (ast.Interpolation,)
 
 
 def all_args(args):
@@ -43,6 +46,12 @@ def walk_until(node, stop):
         return
     for child in ast.iter_child_nodes(node):
         yield from walk_until(child, stop)
+
+
+def walk_childs_first(node):
+    for e in ast.iter_child_nodes(node):
+        yield from walk_childs_first(e)
+        yield e
 
 
 def walk_function_nodes(node):
@@ -81,86 +90,30 @@ def use():
     return True
 
 
-def equal_ast(lhs, rhs, dump_info=False, t="root"):
+def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
     if type(lhs) != type(rhs):
-        if dump_info:
-            print(t, lhs, "!=", rhs)
+        print(t, lhs, "!=", rhs)
         return False
 
     elif isinstance(lhs, list):
         if len(lhs) != len(rhs):
-            if dump_info:
-                print(t, lhs, "!=", rhs)
+            print(t, lhs, "!=", rhs)
             return False
 
         return all(
-            equal_ast(l, r, dump_info, t + f"[{i}]")
+            equal_ast(l, r, print, t + f"[{i}]")
             for i, (l, r) in enumerate(zip(lhs, rhs))
         )
 
     elif isinstance(lhs, ast.AST):
         return all(
-            equal_ast(
-                getattr(lhs, field), getattr(rhs, field), dump_info, t + f".{field}"
-            )
+            equal_ast(getattr(lhs, field), getattr(rhs, field), print, t + f".{field}")
             for field in lhs._fields
         )
     else:
-        if dump_info and lhs != rhs:
+        if lhs != rhs:
             print(t, lhs, "!=", rhs)
         return lhs == rhs
-
-
-def get_info(name):
-    if name in type_infos:
-        return type_infos[name]
-    elif name in ("identifier", "int", "string", "constant"):
-        type_infos[name] = BuiltinNodeType(name)
-
-    else:
-        doc = inspect.getdoc(getattr(ast, name)) or ""
-        doc = doc.replace("\n", " ")
-
-        if doc:
-            m = re.fullmatch(r"(\w*)", doc)
-            if m:
-                nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                name = m.group(1)
-                type_infos[name] = nt
-            else:
-                m = re.fullmatch(r"(\w*)\((.*)\)", doc)
-                if m:
-                    nt = NodeType(fields={}, ast_type=getattr(ast, name))
-                    name = m.group(1)
-                    type_infos[name] = nt
-                    for string_field in m.group(2).split(","):
-                        field_type, field_name = string_field.split()
-                        quantity = ""
-                        last = field_type[-1]
-                        if last in "*?":
-                            quantity = last
-                            field_type = field_type[:-1]
-
-                        nt.fields[field_name] = (field_type, quantity)
-                        get_info(field_type)
-                elif doc.startswith(f"{name} = "):
-                    doc = doc.split(" = ", 1)[1]
-                    nt = UnionNodeType(options=[])
-                    type_infos[name] = nt
-                    nt.options = [d.split("(")[0] for d in doc.split(" | ")]
-                    for o in nt.options:
-                        get_info(o)
-
-                else:
-                    assert False, "can not parse:" + doc
-        else:
-            assert False, "no doc for " + name
-
-    return type_infos[name]
-
-
-if sys.version_info < (3, 9):
-    from .static_type_info import type_infos  # type: ignore
 
 
 import random
@@ -397,14 +350,12 @@ def probability_try(parents, child_name):
     if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
         raise Invalid
 
-    if inside(
-        ("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp")
-    ) and child_name in ("Yield", "YieldFrom"):
+    if inside(comprehensions) and child_name in ("Yield", "YieldFrom"):
         # SyntaxError: 'yield' inside list comprehension
         raise Invalid
 
     if (
-        inside(("GeneratorExp", "ListComp", "SetComp", "DictComp", "DictComp"))
+        inside(comprehensions)
         # TODO restrict to comprehension inside ClassDef
         and inside(
             "ClassDef.body",
@@ -480,6 +431,43 @@ def probability_try(parents, child_name):
         if child_name == "Await" and inside("AnnAssign.annotation"):
             raise Invalid
 
+        if sys.version_info < (3, 13):
+            type_alias_context = ("AsyncFunctionDef", "ClassDef")
+        else:
+            type_alias_context = ("AsyncFunctionDef",)
+
+        if (
+            inside(("TypeAlias", "AnnAssign.annotation"))
+            and inside(type_alias_context)
+            and child_name in comprehensions
+        ):
+            raise Invalid
+
+    if sys.version_info >= (3, 14):
+        if child_name == "NamedExpr" and inside(
+            (
+                "arg.annotation",
+                "FunctionDef.returns",
+                "AsyncFunctionDef.returns",
+            )
+        ):
+            raise Invalid
+
+        if not parent_types[-1] == "TemplateStr" and child_name == "Interpolation":
+            raise Invalid
+
+        if parents[-1] == ("TemplateStr", "values") and child_name not in (
+            "Interpolation",
+            "Constant",
+        ):
+            raise Invalid
+
+        if (
+            parents[-1] == ("Interpolation", "format_spec")
+            and child_name != "JoinedStr"
+        ):
+            raise Invalid
+
     if child_name == "Expr":
         return 30
 
@@ -489,7 +477,7 @@ def probability_try(parents, child_name):
     return 1
 
 
-def fix(node, parents):
+def fix(node: ast.AST, parents: list[tuple[str, str]]):
     if isinstance(node, ast.ImportFrom):
         if use() and not py310plus and node.level is None:
             node.level = 0
@@ -509,7 +497,7 @@ def fix(node, parents):
         # a[(a:b,*c)] <- not valid
         # TODO check this
         found = False
-        new_elts = []
+        new_elts: list[ast.expr] = []
         # allow only the first Slice or Starred
         for e in node.elts:
             if isinstance(e, (ast.Starred, ast.Slice)):
@@ -539,13 +527,16 @@ def fix(node, parents):
         if (
             use()
             and parents
-            and parents[-1] == ("JoinedStr", "values")
+            and (
+                parents[-1] == ("JoinedStr", "values")
+                or parents[-1] == ("TemplateStr", "values")
+            )
             and not isinstance(node.value, str)
         ):
             # TODO: better format string generation
             node.value = str(node.value)
 
-    if isinstance(node, ast.FormattedValue):
+    if isinstance(node, InterpolationOrFormattedValue):
         valid_conversion = (-1, 115, 114, 97)
         if use() and not py310plus and node.conversion is None:
             node.conversion = 5
@@ -694,6 +685,7 @@ def fix(node, parents):
             isinstance(node, ast.MatchValue)
             and isinstance(node.value, ast.Constant)
             and any(node.value.value is v for v in (None, True, False))
+            and isinstance(node.value.value, (type(None), bool))
         ):
             return ast.MatchSingleton(value=node.value.value)
 
@@ -703,7 +695,7 @@ def fix(node, parents):
             return ast.MatchValue(value=ast.Constant(value=node.value))
 
         # @lambda f:lambda pattern:set(f(pattern))
-        def names(node):
+        def all_names(node):
             if isinstance(node, ast.MatchAs) and node.name:
                 yield node.name
             elif isinstance(node, ast.MatchStar) and node.name:
@@ -712,11 +704,11 @@ def fix(node, parents):
                 yield node.rest
             elif isinstance(node, ast.MatchOr):
                 yield from set.intersection(
-                    *[set(names(pattern)) for pattern in node.patterns]
+                    *[set(all_names(pattern)) for pattern in node.patterns]
                 )
             else:
                 for child in ast.iter_child_nodes(node):
-                    yield from names(child)
+                    yield from all_names(child)
 
         class RemoveName(ast.NodeVisitor):
             def __init__(self, condition):
@@ -773,7 +765,7 @@ def fix(node, parents):
 
             def visit_MatchOr(self, node: ast.MatchOr):
                 allowed = set.intersection(
-                    *[set(names(pattern)) for pattern in node.patterns]
+                    *[set(all_names(pattern)) for pattern in node.patterns]
                 )
                 allowed -= self.used
 
@@ -806,11 +798,11 @@ def fix(node, parents):
             seen = set()
             for pattern in node.patterns:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.MatchOr):
             var_names = set.intersection(
-                *[set(names(pattern)) for pattern in node.patterns]
+                *[set(all_names(pattern)) for pattern in node.patterns]
             )
 
             RemoveName(lambda name: name not in var_names).visit(node)
@@ -843,7 +835,7 @@ def fix(node, parents):
             seen = set()
             for pattern in node.patterns:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.MatchClass):
             node.kwd_attrs = unique_by(node.kwd_attrs, lambda e: e)
@@ -852,7 +844,7 @@ def fix(node, parents):
             seen = set()
             for pattern in [*node.patterns, *node.kwd_patterns]:
                 RemoveName(lambda name: name in seen).visit(pattern)
-                seen |= {*names(pattern)}
+                seen |= {*all_names(pattern)}
 
         if isinstance(node, ast.Match):
             node = RemoveNameCleanup().visit(node)
@@ -874,12 +866,7 @@ def fix(node, parents):
         ):
             break
 
-        if not py311plus and parent in (
-            "ListComp",
-            "DictComp",
-            "SetComp",
-            "GeneratorExp",
-        ):
+        if not py311plus and parent in comprehensions:
             break
 
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
@@ -913,11 +900,12 @@ def fix(node, parents):
 
     if (
         use()
-        and isinstance(node, ast.FormattedValue)
+        and isinstance(node, InterpolationOrFormattedValue)
         and isinstance(node.format_spec, ast.JoinedStr)
     ):
         for const in node.format_spec.values:
             if isinstance(const, ast.Constant):
+                assert isinstance(const.value, str)
                 const.value = const.value.replace("{", "").replace("}", "")
 
     if sys.version_info >= (3, 12):
@@ -997,14 +985,34 @@ def fix(node, parents):
                 if use() and no_default:
                     child.default_value = None
 
+    if sys.version_info >= (3, 14):
+        if (
+            use()
+            and isinstance(node, ast.Interpolation)
+            and isinstance(node.value, ast.Constant)
+        ):
+            node.value.value = str(node.value.value)
+
     return node
 
 
 def fix_result(node):
+    if sys.version_info >= (3, 14):
+        for n in walk_childs_first(node):
+            if use() and isinstance(n, ast.Interpolation):
+                f_str = ast.JoinedStr(
+                    [ast.FormattedValue(value=n.value, conversion=-1, format_spec=None)]
+                )
+                f_str_repr = ast.unparse(f_str)
+                if f_str_repr.startswith(("f'''", 'f"""')):
+                    n.str = ast.unparse(f_str)[5:-4]  # strip f"""{...}"""
+                else:
+                    n.str = ast.unparse(f_str)[3:-2]  # strip f"{...}"
+
     return fix_nonlocal(node)
 
 
-def is_valid_ast(tree) -> bool:
+def is_valid_ast(tree, print=lambda *l: None) -> bool:
     def is_valid(node: ast.AST, parents):
         type_name = node.__class__.__name__
         if (
@@ -1041,6 +1049,7 @@ def is_valid_ast(tree) -> bool:
             assert isinstance(info, NodeType)
 
             for attr_name, value in ast.iter_fields(node):
+                assert attr_name in info.fields, f"{attr_name} missing in {info}"
                 attr_info = info.fields[attr_name]
                 if attr_info[1] == "":
                     value_info = get_info(attr_info[0])
@@ -1058,8 +1067,8 @@ def is_valid_ast(tree) -> bool:
                     print("invalid arg length", type_name, attr_name)
                     return False
 
-                if isinstance(value, list) != (info.fields[attr_name][1] == "*"):
-                    print("no list", value)
+                if isinstance(value, list) != ("*" in info.fields[attr_name][1]):
+                    print(f"no list (info {info.fields[attr_name]})")
                     return False
                 if value is None:
                     if not (
@@ -1087,8 +1096,6 @@ def is_valid_ast(tree) -> bool:
     if not is_valid(tree, []):
         return False
 
-    tree_copy = deepcopy(tree)
-
     def fix_tree(node: ast.AST, parents):
         for field in node._fields:
             value = getattr(node, field)
@@ -1114,22 +1121,34 @@ def is_valid_ast(tree) -> bool:
 
         return fix(node, parents)
 
-    tree_copy = fix_tree(tree_copy, [])
-    tree_copy = fix_result(tree_copy)
+    def check_if_changed(tree, tree_copy, operation):
+        result = equal_ast(tree_copy, tree, print)
 
-    result = equal_ast(tree_copy, tree, dump_info=True)
-
-    if 1:
         if sys.version_info >= (3, 9) and not result:
-            dump_copy = ast_dump(tree_copy).splitlines()
             dump = ast_dump(tree).splitlines()
+            dump_copy = ast_dump(tree_copy).splitlines()
             import difflib
 
-            print("ast was changed by during fixing:")
+            print(f"ast was changed while running {operation}:")
 
-            print("\n".join(difflib.unified_diff(dump, dump_copy, "original", "fixed")))
+            print(
+                "\n".join(
+                    difflib.unified_diff(dump, dump_copy, "original", "fixed", n=10)
+                )
+            )
+        return result
 
-    return result
+    tree_copy = deepcopy(tree)
+
+    tree_copy = fix_tree(tree_copy, [])
+    if not check_if_changed(tree, tree_copy, "fix_tree"):
+        return False
+
+    tree_copy = fix_result(tree_copy)
+    if not check_if_changed(tree, tree_copy, "fix_result"):
+        return False
+
+    return True
 
 
 def arguments(
@@ -1460,7 +1479,7 @@ def min_attr_length(node_type, attr_name):
         return 1
     if node_type == "ExtSlice" and attr_name == "dims":
         return 1
-    if sys.version_info < (3, 9) and node_type == "Set" and attr_name == "elts":
+    if sys.version_info < (3, 9, 3) and node_type == "Set" and attr_name == "elts":
         return 1
     if node_type == "Compare" and attr_name in ("ops", "comparators"):
         return 1
@@ -1553,8 +1572,18 @@ class AstGenerator:
                         if not none_allowed(parents) or self.cnd()
                         else None
                     )
+                elif q == "?*":
+                    return [
+                        (
+                            self.generate_impl(t, parents, depth)
+                            if not none_allowed(parents) or self.cnd()
+                            else None
+                        )
+                        for _ in range(attr_length(parents[-1][0], n))
+                    ]
+
                 else:
-                    assert False
+                    assert False, q
 
             attributes = {
                 n: child_node(n, t, q, [*parents, (name, n)])

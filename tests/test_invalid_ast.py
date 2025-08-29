@@ -5,61 +5,83 @@ import textwrap
 import warnings
 from pathlib import Path
 
-import pytest
+sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
+
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
 from pysource_minimize._minimize import minimize_ast
+from .TestBase import TestBase
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def does_compile(tree: ast.Module):
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+class TestInvalidAst(TestBase):
+
+    def setUp(self):
+        self.details = []
+        super().setUp()
+
+    def addDetail(self, text):
+        if hasattr(self, "details"):
+            self.details.append(text)
+
+    def does_compile(self, tree: ast.Module):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+                return False
+            if not isinstance(node, ast.JoinedStr) and any(
+                isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
+            ):
+                return False
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                source = unparse(tree)
+                compile(source, "<file>", "exec")
+                compile(ast.fix_missing_locations(tree), "<file>", "exec")
+        except Exception as e:
+            self.addDetail("exception during `compile(ast.unparse(tree))`:\n" + str(e))
             return False
-        if not isinstance(node, ast.JoinedStr) and any(
-            isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
-        ):
-            return False
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)
-            source = unparse(tree)
-            compile(source, "<file>", "exec")
-            compile(ast.fix_missing_locations(tree), "<file>", "exec")
-    except Exception as e:
-        print(e)
-        return False
-    return True
+        return True
 
 
-@pytest.mark.parametrize(
-    "file", [pytest.param(f, id=f.stem[:12]) for f in sample_dir.glob("*.py")]
-)
-def test_invalid_ast(file):
-    code = file.read_text()
-    print(code)
-    globals = {}
-    try:
-        exec(code, globals)
-    except (NameError, ImportError) as e:
-        pytest.skip(f"wrong python version {e}")
+does_compile = TestInvalidAst().does_compile
 
-    tree = globals["tree"]
 
-    for node in ast.walk(tree):
-        for field in node._fields:
-            if not hasattr(node, field):
-                pytest.skip(
-                    f"wrong python version {node.__class__.__name__} is missing .{field}"
-                )
-        if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
-            pytest.skip(f"ast.Constant can not be unparsed on python3.7")
+def gen_test(name, file):
+    def test_invalid_ast(self):
+        code = file.read_text()
+        self.addDetail("code:\n```\n" + code + "\n```")
+        globals = {}
+        try:
+            exec(code, globals)
+        except (NameError, ImportError) as e:
 
-    assert is_valid_ast(tree) == does_compile(tree)
+            return  # pytest.skip(f"wrong python version {e}")
+
+        tree = globals["tree"]
+
+        for node in ast.walk(tree):
+            for field in node._fields:
+                if not hasattr(node, field):
+                    return  # pytest.skip( f"wrong python version {node.__class__.__name__} is missing .{field}")
+            if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
+                return  # pytest.skip(f"ast.Constant can not be unparsed on python3.7")
+
+        self.assertEqual(
+            is_valid_ast(tree),
+            self.does_compile(tree),
+            msg=self.message(),
+        )
+
+    setattr(TestInvalidAst, "test_" + name, test_invalid_ast)
+
+
+for file in sample_dir.glob("*.py"):
+    gen_test(file.stem, file)
 
 
 def x_test_example():
@@ -75,10 +97,13 @@ def generate_invalid_ast(seed):
 
     tree = generate_ast(seed, depth_limit=9)
     try:
-        assert is_valid_ast(tree)
+        assert is_valid_ast(tree, print)
     except:
-        print(f"error for is_valid_ast seed={seed}")
-        raise
+        print(f"The generated tree is not valid ({seed=}).")
+        print(
+            f"The validity is checked with the generator code which shows a problem in the generation/checking."
+        )
+        return True
 
     if not does_compile(tree):
         last_checked_tree = tree
@@ -124,3 +149,9 @@ def generate_invalid_ast(seed):
         else:
             assert False
     return False
+
+
+if __name__ == "__main__":
+    for i in range(0, 1000):
+        if generate_invalid_ast(i):
+            break

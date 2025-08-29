@@ -1,7 +1,17 @@
 import ast
 import sys
+from pathlib import Path
 
-from inline_snapshot import snapshot
+sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
+
+try:
+    from inline_snapshot import snapshot
+except:
+
+    def snapshot(x):  # type: ignore
+        return x
+
+
 from pysource_codegen._codegen import fix_nonlocal
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump

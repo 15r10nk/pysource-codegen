@@ -7,3 +7,4 @@ dist
 .mutmut-cache
 venv*
 checked_valid_source_files
+uv.lock

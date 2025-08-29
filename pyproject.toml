@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
   "License :: OSI Approved :: MIT License",
@@ -37,10 +38,10 @@ Issues = "https://github.com/15r10nk/pysource-codegen/issues"
 Source = "https://github.com/15r10nk/pysource-codegen"
 
 [tool.hatch.version]
-path = "src/pysource_codegen/__init__.py"
+path = "pysource_codegen/__init__.py"
 
 [[tool.hatch.envs.hatch-test.matrix]]
-python=["3.8","3.9","3.10","3.11","3.12","3.13"]
+python=["3.8","3.9","3.10","3.11","3.12","3.13","3.14"]
 
 [tool.hatch.envs.hatch-test]
 extra-dependencies=[
@@ -50,7 +51,7 @@ extra-dependencies=[
 ]
 
 [[tool.hatch.envs.types.matrix]]
-python=["3.8","3.9","3.10","3.11","3.12","3.13"]
+python=["3.8","3.9","3.10","3.11","3.12","3.13","3.14"]
 
 [tool.hatch.envs.types]
 extra-dependencies = [
@@ -62,18 +63,18 @@ extra-dependencies = [
 ]
 
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:src/pysource_codegen tests}"
+check = "mypy --install-types --non-interactive {args:pysource_codegen tests}"
 
 [tool.coverage.run]
 source_pkgs = ["pysource_codegen", "tests"]
 branch = true
 parallel = true
 omit = [
-  "src/pysource_codegen/__about__.py",
+  "pysource_codegen/__about__.py",
 ]
 
 [tool.coverage.paths]
-pysource_codegen = ["src/pysource_codegen", "*/pysource-codegen/src/pysource_codegen"]
+pysource_codegen = ["pysource_codegen", "*/pysource-codegen/pysource_codegen"]
 tests = ["tests", "*/pysource-codegen/tests"]
 
 [tool.coverage.report]
@@ -85,9 +86,14 @@ major_version_zero = true
 tag_format = "v$major.$minor.$patch$prerelease"
 update_changelog_on_bump = true
 version_files = [
-  "src/pysource_codegen/__init__.py:__version__"
+  "pysource_codegen/__init__.py:__version__"
 ]
 version_provider = "pep621"
 
 [tool.mypy]
 exclude="tests/.*_samples"
+[tool.hatch.envs.release.scripts]
+create=[
+    "cz bump",
+    "git push --force-with-lease origin main $(git describe main --tags)",
+]
