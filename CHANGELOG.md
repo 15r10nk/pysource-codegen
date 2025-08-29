@@ -1,3 +1,18 @@
+## v0.7.0 (2025-08-29)
+
+### Feat
+
+- **3.14**: added support for template-strings
+- use unittest to be able to test cpython main
+- work with cpython/main
+
+### Fix
+
+- fixed type errors
+- fixed 3.14 bugs
+- **3.9**: an empty set can not be unparsed in cpython < 3.9.3
+- add byte literals with characters up to utf-32be
+
 ## v0.6.0 (2024-10-09)
 
 ### Feat
