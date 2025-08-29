@@ -90,6 +90,10 @@ version_files = [
 ]
 version_provider = "pep621"
 
+[tool.scriv]
+format = "md"
+version = "command: cz bump --get-next"
+
 [tool.mypy]
 exclude="tests/.*_samples"
 [tool.hatch.envs.release.scripts]
@@ -97,3 +101,6 @@ create=[
     "cz bump",
     "git push --force-with-lease origin main $(git describe main --tags)",
 ]
+
+[project.scripts]
+pysource-codegen = "pysource_codegen.__main__:run"
