@@ -92,3 +92,8 @@ version_provider = "pep621"
 
 [tool.mypy]
 exclude="tests/.*_samples"
+[tool.hatch.envs.release.scripts]
+create=[
+    "cz bump",
+    "git push --force-with-lease origin main $(git describe main --tags)",
+]
