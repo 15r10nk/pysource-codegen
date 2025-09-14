@@ -65,6 +65,10 @@ extra-dependencies = [
 [tool.hatch.envs.types.scripts]
 check = "mypy --install-types --non-interactive {args:pysource_codegen tests}"
 
+[tool.hatch.envs.cog]
+dependencies=["cogapp","lxml","requests"]
+scripts.update="cog -r *.md"
+
 [tool.coverage.run]
 source_pkgs = ["pysource_codegen", "tests"]
 branch = true
