@@ -100,6 +100,35 @@ find_issue()
 * https://github.com/python/cpython/issues/124746
 * https://github.com/python/cpython/issues/124871
 
+#### 3.14
+
+* https://github.com/python/cpython/issues/138558
+* https://github.com/python/cpython/issues/138479
+* https://github.com/python/cpython/issues/138349
+* https://github.com/python/cpython/issues/132479
+
+<!--[[[cog
+import requests,cog
+
+url = "https://raw.githubusercontent.com/15r10nk/sponsors/refs/heads/main/sponsors_readme.md"
+response = requests.get(url)
+response.raise_for_status()  # Raise an exception for bad status codes
+cog.out(response.text)
+]]]-->
+## Sponsors
+
+I would like to thank my sponsors. Without them, I would not be able to invest so much time in my projects.
+
+### Silver sponsor 🥈
+
+<p align="center">
+  <a href="https://pydantic.dev/logfire">
+    <img src="https://pydantic.dev/assets/for-external/pydantic_logfire_logo_endorsed_lithium_rgb.svg" alt="logfire" width="300"/>
+  </a>
+</p>
+<!--[[[end]]]-->
+
+
 ## Todo:
 
 * [ ] refactor the existing code
