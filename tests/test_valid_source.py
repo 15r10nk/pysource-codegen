@@ -100,7 +100,7 @@ def generate_valid_source(seed):
                 ignored_something = True
             return not ignore
 
-        with patch("pysource_codegen._codegen.use", use):
+        with patch("pysource_codegen._codegen_rules.use", use):
             tree = generate_ast(seed, node_limit=200, depth_limit=5)
 
         max_index = max(max_index, current_index)

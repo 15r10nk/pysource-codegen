@@ -2,6 +2,8 @@ import ast
 import sys
 from pathlib import Path
 
+from pysource_codegen._codegen_rules import fix_nonlocal
+
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
 try:
@@ -12,7 +14,6 @@ except:
         return x
 
 
-from pysource_codegen._codegen import fix_nonlocal
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
 
