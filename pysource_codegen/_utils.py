@@ -75,3 +75,42 @@ def walk_function_nodes(node):
         return
     for child in ast.iter_child_nodes(node):
         yield from walk_function_nodes(child)
+
+
+def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
+    if type(lhs) != type(rhs):
+        print(t, lhs, "!=", rhs)
+        return False
+
+    elif isinstance(lhs, list):
+        if len(lhs) != len(rhs):
+            print(t, lhs, "!=", rhs)
+            return False
+
+        return all(
+            equal_ast(l, r, print, t + f"[{i}]")
+            for i, (l, r) in enumerate(zip(lhs, rhs))
+        )
+
+    elif isinstance(lhs, ast.AST):
+        return all(
+            equal_ast(getattr(lhs, field), getattr(rhs, field), print, t + f".{field}")
+            for field in lhs._fields
+        )
+    else:
+        if lhs != rhs:
+            print(t, lhs, "!=", rhs)
+        return lhs == rhs
+
+
+def only_firstone(l, condition):
+    found = False
+    for i, e in reversed(list(enumerate(l))):
+        if condition(e):
+            if found:
+                del l[i]
+            found = True
+
+
+def unique_by(l, key):
+    return list({key(e): e for e in l}.values())

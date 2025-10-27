@@ -3,19 +3,15 @@ from __future__ import annotations
 import ast
 import itertools
 import sys
-import traceback
-from copy import deepcopy
 from typing import Any
 
 from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
 from ._utils import arguments
-from ._utils import ast_dump
+from ._utils import only_firstone
+from ._utils import unique_by
 from ._utils import walk_childs_first
 from ._utils import walk_function_nodes
-from .ast_info import get_info
-from .types import NodeType
-from .types import UnionNodeType
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
@@ -45,45 +41,6 @@ def use():
     becaus the algo falsely thinks it is invalid.
     """
     return True
-
-
-def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
-    if type(lhs) != type(rhs):
-        print(t, lhs, "!=", rhs)
-        return False
-
-    elif isinstance(lhs, list):
-        if len(lhs) != len(rhs):
-            print(t, lhs, "!=", rhs)
-            return False
-
-        return all(
-            equal_ast(l, r, print, t + f"[{i}]")
-            for i, (l, r) in enumerate(zip(lhs, rhs))
-        )
-
-    elif isinstance(lhs, ast.AST):
-        return all(
-            equal_ast(getattr(lhs, field), getattr(rhs, field), print, t + f".{field}")
-            for field in lhs._fields
-        )
-    else:
-        if lhs != rhs:
-            print(t, lhs, "!=", rhs)
-        return lhs == rhs
-
-
-def only_firstone(l, condition):
-    found = False
-    for i, e in reversed(list(enumerate(l))):
-        if condition(e):
-            if found:
-                del l[i]
-            found = True
-
-
-def unique_by(l, key):
-    return list({key(e): e for e in l}.values())
 
 
 class Invalid(Exception):
@@ -964,145 +921,6 @@ def fix_result(node):
                     n.str = ast.unparse(f_str)[3:-2]  # strip f"{...}"
 
     return fix_nonlocal(node)
-
-
-def is_valid_ast(tree, print=lambda *l: None) -> bool:
-    def is_valid(node: ast.AST, parents):
-        type_name = node.__class__.__name__
-        if (
-            isinstance(node, (ast.AST))
-            and parents
-            and probability(
-                parents,
-                type_name,
-            )
-            == 0
-        ):
-            print("invalid node with:")
-            print("parents:", parents)
-            print("node:", node)
-
-            try:
-                probability_try(
-                    parents,
-                    node.__class__.__name__,
-                )
-            except Invalid:
-                frame = traceback.extract_tb(sys.exc_info()[2])[1]
-                print("file:", f"{frame.filename}:{frame.lineno}")
-
-            return False
-
-        if type_name in same_length:
-            attrs = same_length[type_name]
-            if len({len(v) for k, v in ast.iter_fields(node) if k in attrs}) != 1:
-                return False
-
-        if isinstance(node, (ast.AST)):
-            info = get_info(type_name)
-            assert isinstance(info, NodeType)
-
-            for attr_name, value in ast.iter_fields(node):
-                assert attr_name in info.fields, f"{attr_name} missing in {info}"
-                attr_info = info.fields[attr_name]
-                if attr_info[1] == "":
-                    value_info = get_info(attr_info[0])
-                    if isinstance(value_info, UnionNodeType):
-                        if type(value).__name__ not in value_info.options:
-                            print(
-                                f"{type(node).__name__}.{attr_name} {value} is not one type of {value_info.options}"
-                            )
-                            print("parents are:", parents)
-                            return False
-
-                if isinstance(value, list) and len(value) < min_attr_length(
-                    type_name, attr_name
-                ):
-                    print("invalid arg length", type_name, attr_name)
-                    return False
-
-                if isinstance(value, list) != ("*" in info.fields[attr_name][1]):
-                    print(f"no list (info {info.fields[attr_name]})")
-                    return False
-                if value is None:
-                    if not (
-                        (
-                            info.fields[attr_name][1] == "?"
-                            and none_allowed(parents + [(type_name, attr_name)])
-                        )
-                        or info.fields[attr_name][0] == "constant"
-                    ):
-                        print("none not allowed", parents, type_name, attr_name)
-                        return False
-
-            for field in node._fields:
-                value = getattr(node, field)
-                if isinstance(value, list):
-                    if not all(
-                        is_valid(e, parents + [(type_name, field)]) for e in value
-                    ):
-                        return False
-                else:
-                    if not is_valid(value, parents + [(type_name, field)]):
-                        return False
-        return True
-
-    if not is_valid(tree, []):
-        return False
-
-    def fix_tree(node: ast.AST, parents):
-        for field in node._fields:
-            value = getattr(node, field)
-            if isinstance(value, ast.AST):
-                setattr(
-                    node,
-                    field,
-                    fix_tree(value, parents + [(node.__class__.__name__, field)]),
-                )
-            if isinstance(value, list):
-                setattr(
-                    node,
-                    field,
-                    [
-                        (
-                            fix_tree(v, parents + [(node.__class__.__name__, field)])
-                            if isinstance(v, ast.AST)
-                            else v
-                        )
-                        for v in value
-                    ],
-                )
-
-        return fix(node, parents)
-
-    def check_if_changed(tree, tree_copy, operation):
-        result = equal_ast(tree_copy, tree, print)
-
-        if sys.version_info >= (3, 9) and not result:
-            dump = ast_dump(tree).splitlines()
-            dump_copy = ast_dump(tree_copy).splitlines()
-            import difflib
-
-            print(f"ast was changed while running {operation}:")
-
-            print(
-                "\n".join(
-                    difflib.unified_diff(dump, dump_copy, "original", "fixed", n=10)
-                )
-            )
-        return result
-
-    tree_copy = deepcopy(tree)
-
-    tree_copy = fix_tree(tree_copy, [])
-    if not check_if_changed(tree, tree_copy, "fix_tree"):
-        return False
-
-    tree_copy = fix_result(tree_copy)
-    if not check_if_changed(tree, tree_copy, "fix_result"):
-        return False
-
-    return True
 
 
 def fix_nonlocal(node):

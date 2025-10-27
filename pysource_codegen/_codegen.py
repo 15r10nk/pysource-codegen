@@ -5,7 +5,6 @@ import sys
 import traceback
 from copy import deepcopy
 
-from ._codegen_rules import equal_ast
 from ._codegen_rules import fix
 from ._codegen_rules import fix_result
 from ._codegen_rules import Invalid
@@ -16,6 +15,7 @@ from ._codegen_rules import probability_try
 from ._codegen_rules import same_length
 from ._codegen_rules import use
 from ._utils import ast_dump
+from ._utils import equal_ast
 from ._utils import unparse
 from .ast_info import get_info
 from .types import BuiltinNodeType
