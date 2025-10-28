@@ -38,12 +38,12 @@ class NodeRef:
         return NodeRef(self, name, None, value)
 
 
-def parents_of(node: NodeRef):
-    if node.parent is None:
+def parents_of(node: NodeRef | None):
+    if node is None or node.parent is None:
         return []
     else:
         return parents_of(node.parent) + [
-            (type(node.parent.node).__name__, node.parent_attr)
+            (type(node.parent.node).__name__, node.parent_attr),
         ]
 
 
@@ -216,8 +216,9 @@ class AstGenerator:
         def place(node):
             nonlocal result
             result = node
+            return NodeRef(None, "", None, node)
 
-        self.generate_impl(place, ast_type_name, (), depth)
+        self.generate_impl(place, None, ast_type_name, [], depth)
 
         self.fix(result, [])
         result = self.fix_result(result)
@@ -229,10 +230,13 @@ class AstGenerator:
     def context_after(self, context, node):
         pass
 
-    def generate_NodeType(self, place, info, ast_type_name, parents, depth, stop):
+    def generate_NodeType(
+        self, place, parent_node, info, ast_type_name, parents, depth, stop
+    ):
         ranges = {}
         new_result = info.ast_type()
-        place(new_result)
+        new_node = place(new_result)
+        assert parents_of(new_node) == parents, (parents_of(parent_node), parents)
 
         def attr_length(child, attr_name):
             if ast_type_name == "Module":
@@ -246,6 +250,7 @@ class AstGenerator:
                     return attr_length(child, attrs[0])
 
             if child == "arguments" and attr_name == "defaults":
+                # defaults of function arguments map to args and posonlyargs (but not all have default args)
                 min = 0
                 max = attr_length(child, "posonlyargs") + attr_length(child, "args")
                 ranges[attr_name] = self.rand.randint(min, max)
@@ -263,12 +268,16 @@ class AstGenerator:
                 setattr(new_result, attr_name, [])
 
                 def child_place(node):
-                    getattr(new_result, attr_name).append(node)
+
+                    l = getattr(new_result, attr_name)
+                    l.append(node)
+                    return NodeRef(new_node, attr_name, len(l) - 1, node)
 
             else:
 
                 def child_place(node):
                     setattr(new_result, attr_name, node)
+                    return NodeRef(new_node, attr_name, None, node)
 
             new_parents = [*parents, (ast_type_name, attr_name)]
 
@@ -276,7 +285,9 @@ class AstGenerator:
                 if "?" in quantity and self.none_allowed(new_parents) and self.cnd():
                     child_place(None)
                 else:
-                    self.generate_impl(child_place, node_type, new_parents, depth)
+                    self.generate_impl(
+                        child_place, new_node, node_type, new_parents, depth
+                    )
 
             if "*" in quantity:
                 for _ in range(attr_length(ast_type_name, attr_name)):
@@ -292,9 +303,11 @@ class AstGenerator:
             else:
                 setattr(new_result, attr_name, self.fix(value, new_parents))
 
-        return new_result
+    def generate_UnionNodeType(
+        self, place, parent_node, info, ast_type_name, parents, depth, stop
+    ):
+        # assert parents==parents_of(parent_node),(parents,parents_of(parent_node))
 
-    def generate_UnionNodeType(self, place, info, ast_type_name, parents, depth, stop):
         options_list = [
             (option, self.probability(parents, option)) for option in info.options
         ]
@@ -307,7 +320,8 @@ class AstGenerator:
         assert len(invalid_option) in (0, 1), invalid_option
 
         if len(invalid_option) == 1:
-            return self.generate_impl(place, invalid_option[0], parents, depth)
+            self.generate_impl(place, parent_node, invalid_option[0], parents, depth)
+            return
 
         options = dict(options_list)
         if stop:
@@ -320,12 +334,16 @@ class AstGenerator:
             # TODO: better handling of `type?`
             return None
 
-        return self.generate_impl(
-            place, self.rand.choices(*zip(*options.items()))[0], parents, depth
+        self.generate_impl(
+            place,
+            parent_node,
+            self.rand.choices(*zip(*options.items()))[0],
+            parents,
+            depth,
         )
 
     def generate_BuiltinNodeType(
-        self, place, info, ast_type_name, parents, depth, stop
+        self, place, parent_node, info, ast_type_name, parents, depth, stop
     ):
         if info.kind == "identifier":
             result = f"name_{self.rand.randint(0,5)}"
@@ -359,9 +377,10 @@ class AstGenerator:
             assert False, "unknown kind: " + info.kind
 
         place(result)
-        return result
 
-    def generate_impl(self, place, ast_type_name: str, parents=(), depth=0):
+    def generate_impl(
+        self, place, parent_node, ast_type_name: str, parents=(), depth=0
+    ):
         depth += 1
         self.nodes += 1
 
@@ -372,6 +391,6 @@ class AstGenerator:
 
         info = get_info(ast_type_name)
 
-        return getattr(self, f"generate_{type(info).__name__}")(
-            place, info, ast_type_name, parents, depth, stop
+        getattr(self, f"generate_{type(info).__name__}")(
+            place, parent_node, info, ast_type_name, parents, depth, stop
         )
