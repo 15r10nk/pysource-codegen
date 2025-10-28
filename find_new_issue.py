@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from random import randint
 
 from tests.test_invalid_ast import generate_invalid_ast
+from tests.test_valid_source import generate_valid_source
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -17,14 +18,17 @@ if __name__ == "__main__":
 
     if args.seed is not None:
         print(f"Testing seed {args.seed}")
-        generate_invalid_ast(args.seed)
+        if args.seed % 2 == 0:
+            generate_invalid_ast(args.seed)
+        else:
+            generate_valid_source(args.seed)
     else:
         found = threading.Event()
 
         def try_seed():
             while not found.is_set():
                 i = randint(0, 10000000000)
-                if generate_invalid_ast(i):
+                if generate_invalid_ast(i) if i % 2 == 0 else generate_valid_source(i):
                     found.set()
                     print(f"Found seed: {i}")
                     return i

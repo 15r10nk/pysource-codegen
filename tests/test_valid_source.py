@@ -2,7 +2,8 @@ import ast
 import hashlib
 import sys
 from pathlib import Path
-from unittest.mock import patch
+
+from pysource_codegen._codegen_rules import StdGenerator
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
@@ -90,18 +91,20 @@ def generate_valid_source(seed):
 
         current_index = 0
 
-        def use():
-            nonlocal current_index
-            nonlocal ignored_something
+        class TestGenerator(StdGenerator):
+            def use(self):
+                nonlocal current_index
+                nonlocal ignored_something
 
-            ignore = current_index == ignore_index
-            current_index += 1
-            if ignore:
-                ignored_something = True
-            return not ignore
+                ignore = current_index == ignore_index
+                current_index += 1
+                if ignore:
+                    ignored_something = True
+                return not ignore
 
-        with patch("pysource_codegen._codegen_rules.use", use):
-            tree = generate_ast(seed, node_limit=200, depth_limit=5)
+        tree = generate_ast(
+            seed, node_limit=200, depth_limit=5, generator_type=TestGenerator
+        )
 
         max_index = max(max_index, current_index)
 

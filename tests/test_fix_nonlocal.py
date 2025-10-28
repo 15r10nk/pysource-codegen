@@ -2,7 +2,6 @@ import ast
 import sys
 from pathlib import Path
 
-from pysource_codegen._codegen_rules import fix_nonlocal
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
@@ -52,8 +51,9 @@ def check_code(src, snapshot_value):
     print("original src:")
     print(src)
     print("error:", str(error_str))
+    generator = StdGenerator()
 
-    tree = fix_nonlocal(tree)
+    tree = generator.fix_nonlocal(tree)
     new_src = unparse(tree).strip() + "\n"
 
     print()
