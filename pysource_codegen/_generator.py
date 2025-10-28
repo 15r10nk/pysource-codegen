@@ -5,17 +5,46 @@ import random
 import sys
 import traceback
 from copy import deepcopy
+from dataclasses import dataclass
 
 from ._utils import ast_dump
 from ._utils import equal_ast
 from .ast_info import get_info
-from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
 
 
 class Invalid(Exception):
     pass
+
+
+class Context:
+    pass
+
+
+@dataclass
+class NodeRef:
+    parent: NodeRef | None
+    parent_attr: str
+    parent_attr_index: int | None
+    node: ast.AST
+
+    def __getattr__(self, name):
+        value = getattr(self.node, name)
+        if isinstance(value, list):
+            return [NodeRef(self, name, i, n) for i, n in enumerate(value)]
+        if value is None:
+            return None
+        return NodeRef(self, name, None, value)
+
+
+def parents_of(node: NodeRef):
+    if node.parent is None:
+        return []
+    else:
+        return parents_of(node.parent) + [
+            (type(node.parent.node).__name__, node.parent_attr)
+        ]
 
 
 class AstGenerator:
@@ -181,12 +210,158 @@ class AstGenerator:
 
         return True
 
-    def generate(self, name: str, parents=(), depth=0):
-        result = self.generate_impl(name, parents, depth)
+    def generate(self, ast_type_name: str, depth=0):
+        result = None
+
+        def place(node):
+            nonlocal result
+            result = node
+
+        self.generate_impl(place, ast_type_name, (), depth)
+
+        self.fix(result, [])
         result = self.fix_result(result)
         return result
 
-    def generate_impl(self, name: str, parents=(), depth=0):
+    def context_before(self, context, node, attr, index):
+        pass
+
+    def context_after(self, context, node):
+        pass
+
+    def generate_NodeType(self, place, info, ast_type_name, parents, depth, stop):
+        ranges = {}
+        new_result = info.ast_type()
+        place(new_result)
+
+        def attr_length(child, attr_name):
+            if ast_type_name == "Module":
+                return 20
+
+            same_length = self.same_length()
+
+            if ast_type_name in same_length:
+                attrs = same_length[ast_type_name]
+                if attr_name in attrs[1:]:
+                    return attr_length(child, attrs[0])
+
+            if child == "arguments" and attr_name == "defaults":
+                min = 0
+                max = attr_length(child, "posonlyargs") + attr_length(child, "args")
+                ranges[attr_name] = self.rand.randint(min, max)
+
+            elif attr_name not in ranges:
+                min = self.min_attr_length(child, attr_name)
+
+                max = min if stop else min + 1 if depth > 10 else min + 5
+                ranges[attr_name] = self.rand.randint(min, max)
+
+            return ranges[attr_name]
+
+        for attr_name, (node_type, quantity) in info.fields.items():
+            if "*" in quantity:
+                setattr(new_result, attr_name, [])
+
+                def child_place(node):
+                    getattr(new_result, attr_name).append(node)
+
+            else:
+
+                def child_place(node):
+                    setattr(new_result, attr_name, node)
+
+            new_parents = [*parents, (ast_type_name, attr_name)]
+
+            def gen():
+                if "?" in quantity and self.none_allowed(new_parents) and self.cnd():
+                    child_place(None)
+                else:
+                    self.generate_impl(child_place, node_type, new_parents, depth)
+
+            if "*" in quantity:
+                for _ in range(attr_length(ast_type_name, attr_name)):
+                    gen()
+            else:
+                gen()
+
+            value = getattr(new_result, attr_name)
+            if isinstance(value, list):
+                setattr(
+                    new_result, attr_name, [self.fix(v, new_parents) for v in value]
+                )
+            else:
+                setattr(new_result, attr_name, self.fix(value, new_parents))
+
+        return new_result
+
+    def generate_UnionNodeType(self, place, info, ast_type_name, parents, depth, stop):
+        options_list = [
+            (option, self.probability(parents, option)) for option in info.options
+        ]
+
+        # check if an invalid can actually be valid (test_valid_source.py)
+        invalid_option = [
+            option for (option, prop) in options_list if prop == 0 and not self.use()
+        ]
+
+        assert len(invalid_option) in (0, 1), invalid_option
+
+        if len(invalid_option) == 1:
+            return self.generate_impl(place, invalid_option[0], parents, depth)
+
+        options = dict(options_list)
+        if stop:
+            for final in ("Name", "MatchValue", "Pass"):
+                if options.get(final, 0) != 0:
+                    options = {final: 1}
+                    break
+
+        if sum(options.values()) == 0:
+            # TODO: better handling of `type?`
+            return None
+
+        return self.generate_impl(
+            place, self.rand.choices(*zip(*options.items()))[0], parents, depth
+        )
+
+    def generate_BuiltinNodeType(
+        self, place, info, ast_type_name, parents, depth, stop
+    ):
+        if info.kind == "identifier":
+            result = f"name_{self.rand.randint(0,5)}"
+        elif info.kind == "int":
+            result = self.rand.randint(0, 5)
+        elif info.kind == "string":
+            result = self.rand.choice(["some text", ""])
+        elif info.kind == "constant":
+            result = self.rand.choice(
+                [
+                    None,
+                    b"some bytes",
+                    "some const text",
+                    b"",
+                    "",
+                    "'\"'''\"\"\"{}\\",
+                    b"'\"'''\"\"\"{}\\",
+                    b"\xef\xbb\xbf",  # utf-8
+                    b"\xff\xfe\0\0",  # utf-32
+                    b"\0\0\xfe\xff",  # utf-32be
+                    b"\xff\xfe",  # utf-16
+                    b"\xfe\xff",  # utf-16be
+                    self.rand.randint(0, 20),
+                    self.rand.uniform(0, 20),
+                    True,
+                    False,
+                ]
+            )
+
+        else:
+            assert False, "unknown kind: " + info.kind
+
+        place(result)
+        return result
+
+    def generate_impl(self, place, ast_type_name: str, parents=(), depth=0):
         depth += 1
         self.nodes += 1
 
@@ -195,131 +370,8 @@ class AstGenerator:
 
         stop = depth > self.depth_limit or self.nodes > self.node_limit
 
-        info = get_info(name)
+        info = get_info(ast_type_name)
 
-        if isinstance(info, NodeType):
-            ranges = {}
-
-            def attr_length(child, attr_name):
-                if name == "Module":
-                    return 20
-
-                same_length = self.same_length()
-
-                if name in same_length:
-                    attrs = same_length[name]
-                    if attr_name in attrs[1:]:
-                        return attr_length(child, attrs[0])
-
-                if child == "arguments" and attr_name == "defaults":
-                    min = 0
-                    max = attr_length(child, "posonlyargs") + attr_length(child, "args")
-                    ranges[attr_name] = self.rand.randint(min, max)
-
-                elif attr_name not in ranges:
-                    min = self.min_attr_length(child, attr_name)
-
-                    max = min if stop else min + 1 if depth > 10 else min + 5
-                    ranges[attr_name] = self.rand.randint(min, max)
-
-                return ranges[attr_name]
-
-            def child_node(n, t, q, parents):
-                if q == "":
-                    return self.generate_impl(t, parents, depth)
-                elif q == "*":
-                    return [
-                        self.generate_impl(t, parents, depth)
-                        for _ in range(attr_length(parents[-1][0], n))
-                    ]
-                elif q == "?":
-                    return (
-                        self.generate_impl(t, parents, depth)
-                        if not self.none_allowed(parents) or self.cnd()
-                        else None
-                    )
-                elif q == "?*":
-                    return [
-                        (
-                            self.generate_impl(t, parents, depth)
-                            if not self.none_allowed(parents) or self.cnd()
-                            else None
-                        )
-                        for _ in range(attr_length(parents[-1][0], n))
-                    ]
-
-                else:
-                    assert False, q
-
-            attributes = {
-                n: child_node(n, t, q, [*parents, (name, n)])
-                for n, (t, q) in info.fields.items()
-            }
-
-            result = info.ast_type(**attributes)
-            result = self.fix(result, parents)
-            return result
-
-        if isinstance(info, UnionNodeType):
-            options_list = [
-                (option, self.probability(parents, option)) for option in info.options
-            ]
-
-            invalid_option = [
-                option
-                for (option, prop) in options_list
-                if prop == 0 and not self.use()
-            ]
-
-            assert len(invalid_option) in (0, 1), invalid_option
-
-            if len(invalid_option) == 1:
-                return self.generate_impl(invalid_option[0])
-
-            options = dict(options_list)
-            if stop:
-                for final in ("Name", "MatchValue", "Pass"):
-                    if options.get(final, 0) != 0:
-                        options = {final: 1}
-                        break
-
-            if sum(options.values()) == 0:
-                # TODO: better handling of `type?`
-                return None
-
-            return self.generate_impl(
-                self.rand.choices(*zip(*options.items()))[0], parents, depth
-            )
-        if isinstance(info, BuiltinNodeType):
-            if info.kind == "identifier":
-                return f"name_{self.rand.randint(0,5)}"
-            elif info.kind == "int":
-                return self.rand.randint(0, 5)
-            elif info.kind == "string":
-                return self.rand.choice(["some text", ""])
-            elif info.kind == "constant":
-                return self.rand.choice(
-                    [
-                        None,
-                        b"some bytes",
-                        "some const text",
-                        b"",
-                        "",
-                        "'\"'''\"\"\"{}\\",
-                        b"'\"'''\"\"\"{}\\",
-                        b"\xef\xbb\xbf",  # utf-8
-                        b"\xff\xfe\0\0",  # utf-32
-                        b"\0\0\xfe\xff",  # utf-32be
-                        b"\xff\xfe",  # utf-16
-                        b"\xfe\xff",  # utf-16be
-                        self.rand.randint(0, 20),
-                        self.rand.uniform(0, 20),
-                        True,
-                        False,
-                    ]
-                )
-
-            else:
-                assert False, "unknown kind: " + info.kind
-
-        assert False
+        return getattr(self, f"generate_{type(info).__name__}")(
+            place, info, ast_type_name, parents, depth, stop
+        )
