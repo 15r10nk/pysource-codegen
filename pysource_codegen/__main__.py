@@ -3,7 +3,7 @@ import argparse
 from ._codegen import generate
 
 
-def run():
+def run() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="seed value")
     parser.add_argument(

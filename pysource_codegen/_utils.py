@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import ast
 import sys
+from typing import Callable
+from typing import Hashable
+from typing import Iterator
+from typing import List
+from typing import TypeVar
+from typing import Union
+
+# Recursive value type used in AST comparisons: can be an AST node, a list of
+# values, or a primitive leaf value. We use a forward reference for the list
+# element type so the alias can be recursive.
+Value = Union[ast.AST, List["Value"], str, int, float, bytes, bool, None]
 
 if sys.version_info >= (3, 9):
     from ast import unparse
@@ -9,19 +20,17 @@ else:
     from astunparse import unparse  # type: ignore
 
 
-def only_if(condition: bool, **kwargs) -> dict:
-    return kwargs if condition else {}
-
-
-def ast_dump(node):
-    return ast.dump(node, **only_if(sys.version_info >= (3, 9), indent=2))
+def ast_dump(node: ast.AST) -> str:
+    if sys.version_info >= (3, 9):
+        return ast.dump(node, indent=2)
+    return ast.dump(node)
 
 
 def arguments(
     node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
 ) -> list[ast.arg]:
     args = node.args
-    l = [
+    l: list[ast.arg | None] = [
         *args.args,
         args.vararg,
         *args.kwonlyargs,
@@ -30,10 +39,12 @@ def arguments(
 
     l += args.posonlyargs
 
-    return [arg for arg in l if arg is not None]
+    return [arg for arg in l if arg is not None]  # type: ignore[return-value]
 
 
-def walk_until(node, stop):
+def walk_until(
+    node: ast.AST | list, stop: type | tuple[type, ...]
+) -> Iterator[ast.AST | list]:
     if isinstance(node, stop):
         return
     yield node
@@ -45,13 +56,13 @@ def walk_until(node, stop):
         yield from walk_until(child, stop)
 
 
-def walk_childs_first(node):
+def walk_childs_first(node: ast.AST) -> Iterator[ast.AST]:
     for e in ast.iter_child_nodes(node):
         yield from walk_childs_first(e)
         yield e
 
 
-def walk_function_nodes(node):
+def walk_function_nodes(node: ast.AST | list) -> Iterator[ast.AST | list]:
     if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         for argument in arguments(node):
             if argument.annotation:
@@ -77,12 +88,18 @@ def walk_function_nodes(node):
         yield from walk_function_nodes(child)
 
 
-def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
+def equal_ast(
+    lhs: Value,
+    rhs: Value,
+    print: Callable[..., None] = lambda *args: None,
+    t: str = "root",
+) -> bool:
     if type(lhs) != type(rhs):
         print(t, lhs, "!=", rhs)
         return False
 
     elif isinstance(lhs, list):
+        assert isinstance(rhs, list)
         if len(lhs) != len(rhs):
             print(t, lhs, "!=", rhs)
             return False
@@ -103,7 +120,10 @@ def equal_ast(lhs, rhs, print=lambda *l: None, t="root"):
         return lhs == rhs
 
 
-def only_firstone(l, condition):
+T = TypeVar("T")
+
+
+def only_firstone(l: list[T], condition: Callable[[T], bool]) -> None:
     found = False
     for i, e in reversed(list(enumerate(l))):
         if condition(e):
@@ -112,5 +132,5 @@ def only_firstone(l, condition):
             found = True
 
 
-def unique_by(l, key):
+def unique_by(l: list[T], key: Callable[[T], Hashable]) -> list[T]:
     return list({key(e): e for e in l}.values())

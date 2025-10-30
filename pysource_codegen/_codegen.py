@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import ast
 import warnings
+from typing import Callable
 
 from ._codegen_rules import StdGenerator
 from ._utils import ast_dump
 from ._utils import unparse
 
 
-def is_valid_ast(*a, **ka):
+def is_valid_ast(
+    tree: ast.AST, print: Callable[..., None] = lambda *args: None
+) -> bool:
     generator = StdGenerator()
-    return generator.is_valid_ast(*a, **ka)
+    return generator.is_valid_ast(tree, print)
 
 
-def check(tree):
+def check(tree: ast.AST) -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.arguments):
             assert len(node.posonlyargs) + len(node.args) >= len(
@@ -28,7 +31,7 @@ def generate_ast(
     node_limit: int = 10000000,
     depth_limit: int = 8,
     root_node: str = "Module",
-    generator_type=StdGenerator,
+    generator_type: type[StdGenerator] = StdGenerator,
 ) -> ast.AST:
     generator = generator_type(seed, depth_limit=depth_limit, node_limit=node_limit)
 

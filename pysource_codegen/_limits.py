@@ -1,4 +1,4 @@
-def calc_f_string_expr_limit():
+def calc_f_string_expr_limit() -> int:
     n = 0
     s = "1"
     while True:
@@ -16,7 +16,7 @@ def calc_f_string_expr_limit():
         n += 1
 
 
-def calc_f_string_format_limit():
+def calc_f_string_format_limit() -> int:
     n = 0
     s = "{1}"
     while True:

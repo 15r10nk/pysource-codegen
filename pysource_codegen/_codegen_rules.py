@@ -3,7 +3,9 @@ from __future__ import annotations
 import ast
 import itertools
 import sys
-from typing import Any
+from typing import Callable
+from typing import Iterable
+from typing import Sequence
 
 from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
@@ -25,10 +27,10 @@ comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
 InterpolationOrFormattedValue = (ast.FormattedValue,)
 if sys.version_info >= (3, 14):
-    InterpolationOrFormattedValue += (ast.Interpolation,)
+    InterpolationOrFormattedValue += (ast.Interpolation,)  # type: ignore
 
 
-def all_args(args):
+def all_args(args: ast.arguments) -> tuple[list[ast.arg], ...]:
     if py38plus:
         return (args.posonlyargs, args.args, args.kwonlyargs)
     else:
@@ -46,10 +48,14 @@ class StdGenerator(AstGenerator):
         """
         return True
 
-    def probability_try(self, parents, child_name):
+    def probability_try(
+        self, parents: Sequence[tuple[str, str]], child_name: str
+    ) -> float:
         parent_types = [p[0] for p in parents]
 
-        def inside(types, not_types=()):
+        def inside(
+            types: str | tuple[str, ...], not_types: tuple[str, ...] = ()
+        ) -> bool:
             if not isinstance(types, tuple):
                 types = (types,)
 
@@ -298,7 +304,7 @@ class StdGenerator(AstGenerator):
                 )
             )[::-1]
 
-            def valid_deco_parents(parents):
+            def valid_deco_parents(parents: Sequence[tuple[str, str]]) -> bool:
                 # Call?,Attribute*
                 parents = list(parents)
                 if parents and parents[0] == ("Call", "func"):
@@ -400,15 +406,19 @@ class StdGenerator(AstGenerator):
 
         return 1
 
-    def fix(self, node: ast.AST, parents: list[tuple[str, str]]):
+    def fix(
+        self, node: ast.AST | None, parents: Sequence[tuple[str, str]]
+    ) -> ast.AST | None:
+        if node is None:
+            return node
         if isinstance(node, ast.ImportFrom):
             if self.use() and not py310plus and node.level is None:
                 node.level = 0
 
             if (
                 self.use()
-                and node.module == None
-                and (node.level == None or node.level == 0)
+                and node.module is None
+                and (node.level is None or node.level == 0)
             ):
                 node.level = 1
 
@@ -576,7 +586,9 @@ class StdGenerator(AstGenerator):
             use = self.use
 
             class Transformer(ast.NodeTransformer):
-                def visit_NamedExpr(self, node: ast.NamedExpr):
+                def visit_NamedExpr(
+                    self, node: ast.NamedExpr
+                ) -> ast.AST | list[ast.AST] | None:
                     if use() and node.target.id in names:
                         return self.visit(node.value)
                     return self.generic_visit(node)
@@ -586,7 +598,7 @@ class StdGenerator(AstGenerator):
         # pattern matching
         if sys.version_info >= (3, 10):
 
-            def match_wildcard(node):
+            def match_wildcard(node: ast.AST) -> bool:
                 if isinstance(node, ast.MatchAs):
                     return (
                         node.pattern is None
@@ -595,6 +607,9 @@ class StdGenerator(AstGenerator):
                     )
                 if isinstance(node, ast.MatchOr):
                     return any(match_wildcard(p) for p in node.patterns)
+
+                # default: not a wildcard
+                return False
 
             if isinstance(node, ast.Match):
                 found = False
@@ -647,66 +662,76 @@ class StdGenerator(AstGenerator):
                         yield from all_names(child)
 
             class RemoveName(ast.NodeVisitor):
-                def __init__(self, condition):
+                def __init__(self, condition: Callable[[str | None], bool]) -> None:
                     self.condition = condition
 
-                def visit_MatchAs(self, node):
+                def visit_MatchAs(self, node: ast.MatchAs) -> None:
                     if self.condition(node.name):
                         node.name = None
 
-                def visit_MatchMapping(self, node):
+                def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
                     if self.condition(node.rest):
                         node.rest = None
 
             class RemoveNameCleanup(ast.NodeTransformer):
-                def visit_MatchAs(self, node):
+                def visit_MatchAs(
+                    self, node: ast.MatchAs
+                ) -> ast.AST | list[ast.AST] | None:
                     if node.name is None and node.pattern is not None:
                         return self.visit(node.pattern)
                     return self.generic_visit(node)
 
             class FixPatternNames(ast.NodeTransformer):
-                def __init__(self, used=None, allowed=None):
+                def __init__(
+                    self, used: set[str] | None = None, allowed: set[str] | None = None
+                ) -> None:
                     # variables which are already used
-                    self.used = set() if used is None else used
+                    self.used: set[str] = set() if used is None else set(used)
                     # variables which are allowed in a MatchOr
-                    self.allowed = allowed
+                    self.allowed: set[str] | None = allowed
 
-                def is_allowed(self, name):
+                def is_allowed(self, name: str | None) -> bool:
                     return (
                         name is None
                         or name not in self.used
                         and (name in self.allowed if self.allowed is not None else True)
                     )
 
-                def visit_MatchAs(self, node):
+                def visit_MatchAs(
+                    self, node: ast.MatchAs
+                ) -> ast.AST | list[ast.AST] | None:
                     if not self.is_allowed(node.name):
                         return ast.MatchSingleton(value=None)
                     elif node.name is not None:
                         self.used.add(node.name)
                     return self.generic_visit(node)
 
-                def visit_MatchStar(self, node):
+                def visit_MatchStar(
+                    self, node: ast.MatchStar
+                ) -> ast.AST | list[ast.AST] | None:
                     if not self.is_allowed(node.name):
                         return ast.MatchSingleton(value=None)
                     elif node.name is not None:
                         self.used.add(node.name)
                     return self.generic_visit(node)
 
-                def visit_MatchMapping(self, node):
+                def visit_MatchMapping(
+                    self, node: ast.MatchMapping
+                ) -> ast.AST | list[ast.AST] | None:
                     if not self.is_allowed(node.rest):
                         return ast.MatchSingleton(value=None)
                     elif node.rest is not None:
                         self.used.add(node.rest)
                     return self.generic_visit(node)
 
-                def visit_MatchOr(self, node: ast.MatchOr):
+                def visit_MatchOr(self, node: ast.MatchOr) -> ast.MatchOr:
                     allowed = set.intersection(
                         *[set(all_names(pattern)) for pattern in node.patterns]
                     )
                     allowed -= self.used
 
                     node.patterns = [
-                        FixPatternNames(set(self.used), allowed).visit(child)
+                        FixPatternNames(set(self.used), allowed).visit(child)  # type: ignore[arg-type]
                         for child in node.patterns
                     ]
 
@@ -858,19 +883,23 @@ class StdGenerator(AstGenerator):
                             return self.generic_visit(node)
                         return self.visit(node.value)
 
-                    def visit_Yield(self, node: ast.Yield) -> Any:
+                    def visit_Yield(
+                        self, node: ast.Yield
+                    ) -> ast.AST | list[ast.AST] | None:
                         if not use():
                             return self.generic_visit(node)
                         if node.value is None:
                             return ast.Constant(value=None)
                         return self.visit(node.value)
 
-                    def visit_YieldFrom(self, node: ast.YieldFrom) -> Any:
+                    def visit_YieldFrom(
+                        self, node: ast.YieldFrom
+                    ) -> ast.AST | list[ast.AST] | None:
                         if not use():
                             return self.generic_visit(node)
                         return self.visit(node.value)
 
-                    # def visit_Lambda(self, node: ast.Lambda) -> Any:
+                    # def visit_Lambda(self, node: ast.Lambda) -> ast.AST | list[ast.AST] | None:
                     #     if not use():
                     #         return self.generic_visit(node)
                     #     return self.visit(node.body)
@@ -881,15 +910,19 @@ class StdGenerator(AstGenerator):
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.type_params
             ):
-                for arg in [
+                for func_arg in [
                     *node.args.posonlyargs,
                     *node.args.args,
                     *node.args.kwonlyargs,
                     node.args.vararg,
                     node.args.kwarg,
                 ]:
-                    if self.use() and arg is not None and arg.annotation:
-                        arg.annotation = cleanup_annotation(arg.annotation)
+                    if (
+                        self.use()
+                        and func_arg is not None
+                        and func_arg.annotation is not None
+                    ):
+                        func_arg.annotation = cleanup_annotation(func_arg.annotation)
 
                 if self.use() and node.returns is not None:
                     node.returns = cleanup_annotation(node.returns)
@@ -921,7 +954,7 @@ class StdGenerator(AstGenerator):
                 # non-default type parameter 'name_1' follows default type parameter
                 no_default = False
                 for child in reversed(node.type_params):
-                    if child.default_value != None:
+                    if child.default_value is not None:
                         no_default = True
                     if self.use() and no_default:
                         child.default_value = None
@@ -961,25 +994,32 @@ class StdGenerator(AstGenerator):
             removes invalid Nonlocals from the class/function
             """
 
-            def __init__(self, locals, nonlocals, globals, type_params, parent_globals):
-                self.locals = set(locals)
-                self.used_names = set(locals)
-                self.type_params = set(type_params)
+            def __init__(
+                self,
+                locals: Iterable[str],
+                nonlocals: Iterable[str],
+                globals: Iterable[str],
+                type_params: Iterable[str],
+                parent_globals: Iterable[str],
+            ) -> None:
+                self.locals: set[str] = set(locals)
+                self.used_names: set[str] = set(locals)
+                self.type_params: set[str] = set(type_params)
 
                 # nonlocals from the parent scope
-                self.nonlocals = set(nonlocals)
-                self.used_nonlocals = set()
+                self.nonlocals: set[str] = set(nonlocals)
+                self.used_nonlocals: set[str] = set()
 
                 # globals from the global scope
-                self.globals = set(globals)
-                self.used_globals = set()
+                self.globals: set[str] = set(globals)
+                self.used_globals: set[str] = set()
                 self.parent_globals = parent_globals
 
-            def name_assigned(self, name):
+            def name_assigned(self, name: str) -> None:
                 self.locals.add(name)
                 self.used_names.add(name)
 
-            def visit_Name(self, node: ast.Name) -> Any:
+            def visit_Name(self, node: ast.Name) -> ast.AST | list[ast.AST] | None:
                 if isinstance(node.ctx, (ast.Store, ast.Del)):
                     self.name_assigned(node.id)
                 else:
@@ -988,10 +1028,13 @@ class StdGenerator(AstGenerator):
 
             if sys.version_info >= (3, 10):
 
-                def visit_MatchAs(self, node: ast.MatchAs) -> Any:
+                def visit_MatchAs(
+                    self, node: ast.MatchAs
+                ) -> ast.AST | list[ast.AST] | None:
                     if node.pattern:
                         self.visit(node.pattern)
-                    self.name_assigned(node.name)
+                    if node.name is not None:
+                        self.name_assigned(node.name)
                     return node
 
             def search_walrus(self, node):
@@ -999,27 +1042,37 @@ class StdGenerator(AstGenerator):
                     if isinstance(n, ast.NamedExpr):
                         self.visit(n.target)
 
-            def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
+            def visit_GeneratorExp(
+                self, node: ast.GeneratorExp
+            ) -> ast.AST | list[ast.AST] | None:
                 self.visit(node.generators[0].iter)
                 self.search_walrus(node)
                 return node
 
-            def visit_ListComp(self, node: ast.ListComp) -> Any:
+            def visit_ListComp(
+                self, node: ast.ListComp
+            ) -> ast.AST | list[ast.AST] | None:
                 self.visit(node.generators[0].iter)
                 self.search_walrus(node)
                 return node
 
-            def visit_DictComp(self, node: ast.DictComp) -> Any:
+            def visit_DictComp(
+                self, node: ast.DictComp
+            ) -> ast.AST | list[ast.AST] | None:
                 self.visit(node.generators[0].iter)
                 self.search_walrus(node)
                 return node
 
-            def visit_SetComp(self, node: ast.SetComp) -> Any:
+            def visit_SetComp(
+                self, node: ast.SetComp
+            ) -> ast.AST | list[ast.AST] | None:
                 self.visit(node.generators[0].iter)
                 self.search_walrus(node)
                 return node
 
-            def visit_Nonlocal(self, node: ast.Nonlocal) -> Any:
+            def visit_Nonlocal(
+                self, node: ast.Nonlocal
+            ) -> ast.AST | list[ast.AST] | None:
                 # TODO: research __class__ seems to be defined in the class scope
                 # but it is also not
                 # class A:
@@ -1044,7 +1097,7 @@ class StdGenerator(AstGenerator):
 
                 return node
 
-            def visit_Global(self, node: ast.Global) -> Any:
+            def visit_Global(self, node: ast.Global) -> ast.AST | list[ast.AST] | None:
                 node.names = [
                     name
                     for name in node.names
@@ -1059,7 +1112,9 @@ class StdGenerator(AstGenerator):
 
                 return node
 
-            def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
+            def visit_AnnAssign(
+                self, node: ast.AnnAssign
+            ) -> ast.AST | list[ast.AST] | None:
                 if isinstance(node.target, ast.Name) and (
                     node.target.id in self.used_globals
                     or node.target.id in self.used_nonlocals
@@ -1076,8 +1131,11 @@ class StdGenerator(AstGenerator):
                         return ast.Pass()
                 return self.generic_visit(node)
 
-            def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
-                self.name_assigned(node.name)
+            def visit_FunctionDef(
+                self, node: ast.FunctionDef
+            ) -> ast.AST | list[ast.AST] | None:
+                if node.name is not None:
+                    self.name_assigned(node.name)
 
                 all_nodes = [
                     *node.args.defaults,
@@ -1094,7 +1152,7 @@ class StdGenerator(AstGenerator):
 
                 return node
 
-            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
                 self.name_assigned(node.name)
 
                 all_nodes = [
@@ -1111,7 +1169,9 @@ class StdGenerator(AstGenerator):
                         self.visit(default)
                 return node
 
-            def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+            def visit_ClassDef(
+                self, node: ast.ClassDef
+            ) -> ast.AST | list[ast.AST] | None:
                 for expr in [
                     *[k.value for k in node.keywords],
                     *node.bases,
@@ -1127,23 +1187,28 @@ class StdGenerator(AstGenerator):
             # pattern matching
             if sys.version_info >= (3, 10):
 
-                def visit_MatchMapping(self, node: ast.MatchMapping) -> Any:
+                def visit_MatchMapping(
+                    self, node: ast.MatchMapping
+                ) -> ast.AST | list[ast.AST] | None:
                     if node.rest is not None:
                         self.name_assigned(node.rest)
                     return self.generic_visit(node)
 
             if sys.version_info >= (3, 13):
 
-                def visit_MatchStar(self, node: ast.MatchStar) -> Any:
-                    self.name_assigned(node.name)
+                def visit_MatchStar(self, node: ast.MatchStar):
+                    if node.name:
+                        self.name_assigned(node.name)
                     return self.generic_visit(node)
 
-            def visit_ExceptHandler(self, handler):
+            def visit_ExceptHandler(
+                self, handler: ast.ExceptHandler
+            ) -> ast.AST | list[ast.AST] | None:
                 if handler.name:
                     self.name_assigned(handler.name)
                 return self.generic_visit(handler)
 
-            def visit_Lambda(self, node: ast.Lambda) -> Any:
+            def visit_Lambda(self, node: ast.Lambda) -> ast.AST | list[ast.AST] | None:
                 for default in [*node.args.defaults, *node.args.kw_defaults]:
                     if default is not None:
                         self.visit(default)
@@ -1153,7 +1218,7 @@ class StdGenerator(AstGenerator):
 
                 try_attrs = ("body", "orelse", "handlers", "finalbody")
 
-                def visit_Try(self, node: ast.Try) -> Any:
+                def visit_Try(self, node: ast.Try) -> ast.AST | list[ast.AST] | None:
                     # work around for https://github.com/python/cpython/issues/111123
                     args = {
                         k: [self.visit(x) for x in getattr(node, k)]
@@ -1166,7 +1231,9 @@ class StdGenerator(AstGenerator):
 
                 if sys.version_info >= (3, 11):
 
-                    def visit_TryStar(self, node: ast.TryStar) -> Any:
+                    def visit_TryStar(
+                        self, node: ast.TryStar
+                    ) -> ast.AST | list[ast.AST] | None:
                         # work around for https://github.com/python/cpython/issues/111123
                         args = {
                             k: [self.visit(x) for x in getattr(node, k)]
@@ -1182,23 +1249,35 @@ class StdGenerator(AstGenerator):
             - transformes a class/function
             """
 
-            def __init__(self, nonlocals, globals, type_params, parent_globals):
+            def __init__(
+                self,
+                nonlocals: Iterable[str],
+                globals: Iterable[str],
+                type_params: Iterable[str],
+                parent_globals: Iterable[str],
+            ) -> None:
                 self.nonlocals = set(nonlocals)
                 self.globals = set(globals)
                 self.type_params = type_params
                 self.parent_globals = parent_globals
 
-            def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
+            def visit_FunctionDef(
+                self, node: ast.FunctionDef
+            ) -> ast.AST | list[ast.AST] | None:
                 return self.handle_function(node)
 
-            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
+            def visit_AsyncFunctionDef(
+                self, node: ast.AsyncFunctionDef
+            ) -> ast.AST | list[ast.AST] | None:
                 return self.handle_function(node)
 
-            def visit_Lambda(self, node: ast.Lambda) -> Any:
+            def visit_Lambda(self, node: ast.Lambda) -> ast.AST | list[ast.AST] | None:
                 # there are no globals/nonlocals/functiondefs in lambdas
                 return node
 
-            def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+            def visit_ClassDef(
+                self, node: ast.ClassDef
+            ) -> ast.AST | list[ast.AST] | None:
                 type_params = set(self.type_params)
                 if sys.version_info >= (3, 12):
                     type_params |= {typ.name for typ in node.type_params}  # type: ignore
@@ -1217,7 +1296,7 @@ class StdGenerator(AstGenerator):
 
             def handle_function(
                 self, node: ast.FunctionDef | ast.AsyncFunctionDef
-            ) -> Any:
+            ) -> ast.AST | list[ast.AST] | None:
                 names = {arg.arg for arg in arguments(node)}
 
                 type_params = set(self.type_params)
@@ -1249,7 +1328,7 @@ class StdGenerator(AstGenerator):
         node = FunctionTransformer([], [], [], []).visit(node)
         return node
 
-    def min_attr_length(self, node_type, attr_name):
+    def min_attr_length(self, node_type: str, attr_name: str) -> int:
         attr = f"{node_type}.{attr_name}"
         if node_type == "Module" and attr_name == "body":
             return 0
@@ -1287,12 +1366,12 @@ class StdGenerator(AstGenerator):
 
         return 0
 
-    def none_allowed(self, parents):
+    def none_allowed(self, parents: Sequence[tuple[str, str]]) -> bool:
         if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
             return False
         return True
 
-    def same_length(self):
+    def same_length(self) -> dict[str, list[str]]:
         return {
             "MatchClass": ["kwd_attrs", "kwd_patterns"],
             "MatchMapping": ["patterns", "keys"],

@@ -6,12 +6,19 @@ import sys
 import traceback
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Callable
+from typing import Sequence
+from typing import Union
 
 from ._utils import ast_dump
 from ._utils import equal_ast
 from .ast_info import get_info
+from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
+
+# A generated value can be either an AST node or one of the builtin leaf values
+GeneratedValue = Union[ast.AST, str, int, float, bytes, bool, None]
 
 
 class Invalid(Exception):
@@ -29,7 +36,7 @@ class NodeRef:
     parent_attr_index: int | None
     node: ast.AST
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> NodeRef | list[NodeRef] | None:
         value = getattr(self.node, name)
         if isinstance(value, list):
             return [NodeRef(self, name, i, n) for i, n in enumerate(value)]
@@ -38,7 +45,7 @@ class NodeRef:
         return NodeRef(self, name, None, value)
 
 
-def parents_of(node: NodeRef | None):
+def parents_of(node: NodeRef | None) -> list[tuple[str, str]]:
     if node is None or node.parent is None:
         return []
     else:
@@ -48,25 +55,65 @@ def parents_of(node: NodeRef | None):
 
 
 class AstGenerator:
-    def __init__(self, seed=None, node_limit=10000000, depth_limit=8):
+    def __init__(
+        self,
+        seed: int | float | str | bytes | bytearray | None = None,
+        node_limit: int = 10000000,
+        depth_limit: int = 8,
+    ) -> None:
         self.rand = random.Random(seed)
         self.nodes = 0
         self.node_limit = node_limit
         self.depth_limit = depth_limit
 
-    def cnd(self):
+    def cnd(self) -> bool:
         return self.rand.choice([True, False])
 
-    def fix_result(self, result):
+    def fix_result(self, result: ast.AST | None) -> ast.AST:
+        """Hook to post-process a generated AST. Accept None during generation.
+
+        Subclasses should override. Default raises NotImplementedError to
+        preserve previous behavior.
+        """
         raise NotImplementedError
 
-    def probability(self, parents, child_name):
+    # --- helper stubs so static type checkers know these exist ---
+    def probability_try(
+        self, parents: Sequence[tuple[str, str]], child_name: str
+    ) -> float:
+        """Return probability for child_name given parents or raise Invalid.
+
+        Real implementations live elsewhere; default raises Invalid to signal
+        an undefined decision point.
+        """
+        raise Invalid
+
+    def same_length(self) -> dict:
+        return {}
+
+    def min_attr_length(self, type_name: str, attr_name: str) -> int:
+        return 0
+
+    def none_allowed(self, parents: Sequence[tuple[str, str]]) -> bool:
+        return True
+
+    def fix(
+        self, node: ast.AST | None, parents: Sequence[tuple[str, str]]
+    ) -> ast.AST | None:
+        return node
+
+    def use(self) -> bool:
+        return True
+
+    def probability(self, parents: Sequence[tuple[str, str]], child_name: str) -> float:
         try:
             return self.probability_try(parents, child_name)
         except Invalid:
             return 0
 
-    def is_valid_ast(self, tree, print=lambda *l: None) -> bool:
+    def is_valid_ast(
+        self, tree: ast.AST, print: Callable[..., None] = lambda *args: None
+    ) -> bool:
         def is_valid(node: ast.AST, parents):
             type_name = node.__class__.__name__
             if (
@@ -210,7 +257,7 @@ class AstGenerator:
 
         return True
 
-    def generate(self, ast_type_name: str, depth=0):
+    def generate(self, ast_type_name: str, depth: int = 0) -> ast.AST:
         result = None
 
         def place(node):
@@ -224,15 +271,24 @@ class AstGenerator:
         result = self.fix_result(result)
         return result
 
-    def context_before(self, context, node, attr, index):
+    def context_before(
+        self, context: Context | None, node: NodeRef, attr: str, index: int | None
+    ) -> Context | None:
         pass
 
-    def context_after(self, context, node):
+    def context_after(self, context: Context | None, node: NodeRef) -> Context | None:
         pass
 
     def generate_NodeType(
-        self, place, parent_node, info, ast_type_name, parents, depth, stop
-    ):
+        self,
+        place: Callable[[GeneratedValue], NodeRef],
+        parent_node: NodeRef | None,
+        info: NodeType,
+        ast_type_name: str,
+        parents: Sequence[tuple[str, str]],
+        depth: int,
+        stop: bool,
+    ) -> None:
         ranges = {}
         new_result = info.ast_type()
         new_node = place(new_result)
@@ -269,9 +325,9 @@ class AstGenerator:
 
                 def child_place(node):
 
-                    l = getattr(new_result, attr_name)
-                    l.append(node)
-                    return NodeRef(new_node, attr_name, len(l) - 1, node)
+                    lst = getattr(new_result, attr_name)
+                    lst.append(node)
+                    return NodeRef(new_node, attr_name, len(lst) - 1, node)
 
             else:
 
@@ -304,8 +360,15 @@ class AstGenerator:
                 setattr(new_result, attr_name, self.fix(value, new_parents))
 
     def generate_UnionNodeType(
-        self, place, parent_node, info, ast_type_name, parents, depth, stop
-    ):
+        self,
+        place: Callable[[GeneratedValue], NodeRef],
+        parent_node: NodeRef | None,
+        info: UnionNodeType,
+        ast_type_name: str,
+        parents: Sequence[tuple[str, str]],
+        depth: int,
+        stop: bool,
+    ) -> None:
         # assert parents==parents_of(parent_node),(parents,parents_of(parent_node))
 
         options_list = [
@@ -343,8 +406,16 @@ class AstGenerator:
         )
 
     def generate_BuiltinNodeType(
-        self, place, parent_node, info, ast_type_name, parents, depth, stop
-    ):
+        self,
+        place: Callable[[GeneratedValue], NodeRef],
+        parent_node: NodeRef | None,
+        info: BuiltinNodeType,
+        ast_type_name: str,
+        parents: Sequence[tuple[str, str]],
+        depth: int,
+        stop: bool,
+    ) -> None:
+        result: str | int | float | bytes | bool | None
         if info.kind == "identifier":
             result = f"name_{self.rand.randint(0,5)}"
         elif info.kind == "int":
@@ -379,8 +450,13 @@ class AstGenerator:
         place(result)
 
     def generate_impl(
-        self, place, parent_node, ast_type_name: str, parents=(), depth=0
-    ):
+        self,
+        place: Callable[[GeneratedValue], NodeRef],
+        parent_node: NodeRef | None,
+        ast_type_name: str,
+        parents: Sequence[tuple[str, str]] = (),
+        depth: int = 0,
+    ) -> None:
         depth += 1
         self.nodes += 1
 
