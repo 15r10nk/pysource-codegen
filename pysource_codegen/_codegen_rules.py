@@ -406,11 +406,7 @@ class StdGenerator(AstGenerator):
 
         return 1
 
-    def fix(
-        self, node: ast.AST | None, parents: Sequence[tuple[str, str]]
-    ) -> ast.AST | None:
-        if node is None:
-            return node
+    def fix(self, node: ast.AST, parents: list[tuple[str, str]]) -> ast.AST:
         if isinstance(node, ast.ImportFrom):
             if self.use() and not py310plus and node.level is None:
                 node.level = 0

@@ -69,7 +69,7 @@ class AstGenerator:
     def cnd(self) -> bool:
         return self.rand.choice([True, False])
 
-    def fix_result(self, result: ast.AST | None) -> ast.AST:
+    def fix_result(self, result: ast.AST) -> ast.AST:
         """Hook to post-process a generated AST. Accept None during generation.
 
         Subclasses should override. Default raises NotImplementedError to
@@ -78,9 +78,7 @@ class AstGenerator:
         raise NotImplementedError
 
     # --- helper stubs so static type checkers know these exist ---
-    def probability_try(
-        self, parents: Sequence[tuple[str, str]], child_name: str
-    ) -> float:
+    def probability_try(self, parents: list[tuple[str, str]], child_name: str) -> float:
         """Return probability for child_name given parents or raise Invalid.
 
         Real implementations live elsewhere; default raises Invalid to signal
@@ -94,18 +92,16 @@ class AstGenerator:
     def min_attr_length(self, type_name: str, attr_name: str) -> int:
         return 0
 
-    def none_allowed(self, parents: Sequence[tuple[str, str]]) -> bool:
+    def none_allowed(self, parents: list[tuple[str, str]]) -> bool:
         return True
 
-    def fix(
-        self, node: ast.AST | None, parents: Sequence[tuple[str, str]]
-    ) -> ast.AST | None:
+    def fix(self, node: ast.AST, parents: list[tuple[str, str]]) -> ast.AST:
         return node
 
     def use(self) -> bool:
         return True
 
-    def probability(self, parents: Sequence[tuple[str, str]], child_name: str) -> float:
+    def probability(self, parents: list[tuple[str, str]], child_name: str) -> float:
         try:
             return self.probability_try(parents, child_name)
         except Invalid:
@@ -114,9 +110,9 @@ class AstGenerator:
     def is_valid_ast(
         self, tree: ast.AST, print: Callable[..., None] = lambda *args: None
     ) -> bool:
-        from typing import Sequence
+        pass
 
-        def is_valid(node: ast.AST, parents: Sequence[tuple[str, str]]) -> bool:
+        def is_valid(node: ast.AST, parents: list[tuple[str, str]]) -> bool:
             type_name = node.__class__.__name__
             if (
                 isinstance(node, ast.AST)
@@ -255,6 +251,7 @@ class AstGenerator:
             return NodeRef(None, "", None, node)
 
         self.generate_impl(place, None, ast_type_name, [], depth)
+        assert result is not None
 
         self.fix(result, [])
         result = self.fix_result(result)
@@ -354,7 +351,7 @@ class AstGenerator:
         parent_node: NodeRef | None,
         info: UnionNodeType,
         ast_type_name: str,
-        parents: Sequence[tuple[str, str]],
+        parents: list[tuple[str, str]],
         depth: int,
         stop: bool,
     ) -> None:
