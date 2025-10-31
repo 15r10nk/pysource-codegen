@@ -1,25 +1,28 @@
 import ast
 import unittest
 import warnings
+from typing import List
 
 from pysource_codegen._codegen import unparse
 
 
 class TestBase(unittest.TestCase):
 
-    def setUp(self):
+    details: List[str]
+
+    def setUp(self) -> None:
         self.details = []
         super().setUp()
 
-    def addDetail(self, *text):
-        text = " ".join(map(str, text))
+    def addDetail(self, *text: object) -> None:
+        text_str = " ".join(map(str, text))
         if hasattr(self, "details"):
-            self.details.append(text)
+            self.details.append(text_str)
 
-    def message(self):
+    def message(self) -> str:
         return "detailed info:\n" + "\n\n".join(self.details)
 
-    def does_compile(self, tree: ast.Module):
+    def does_compile(self, tree: ast.Module) -> bool:
         for node in ast.walk(tree):
             if isinstance(node, ast.BoolOp) and len(node.values) < 2:
                 return False

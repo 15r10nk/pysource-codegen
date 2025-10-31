@@ -1,16 +1,19 @@
 import ast
 import sys
 from pathlib import Path
+from typing import Any
+
+from pysource_codegen._codegen_rules import StdGenerator
 
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
 try:
     from inline_snapshot import snapshot
-except:
+except Exception:
 
-    def snapshot(x):  # type: ignore
-        return x
+    def snapshot(obj: Any = None) -> Any:
+        return obj
 
 
 from pysource_codegen._codegen import unparse
@@ -35,7 +38,7 @@ known_errors = snapshot(
 )
 
 
-def check_code(src, snapshot_value):
+def check_code(src: str, snapshot_value: Any) -> None:
     try:
         compile(src, "<string>", "exec")
     except SyntaxError as error:
@@ -53,12 +56,12 @@ def check_code(src, snapshot_value):
     print("error:", str(error_str))
     generator = StdGenerator()
 
-    tree = generator.fix_nonlocal(tree)
-    new_src = unparse(tree).strip() + "\n"
+    fixed_tree = generator.fix_nonlocal(tree)
+    new_src = unparse(fixed_tree).strip() + "\n"
 
     print()
     print("transformed tree:")
-    print(ast_dump(tree))
+    print(ast_dump(fixed_tree))
     print("transformed src:")
     print(new_src)
 
@@ -67,7 +70,7 @@ def check_code(src, snapshot_value):
     assert new_src == snapshot_value
 
 
-def test_global_0():
+def test_global_0() -> None:
     check_code(
         """
 def a(x):
@@ -82,7 +85,7 @@ def a(x):
     )
 
 
-def test_global_1():
+def test_global_1() -> None:
     check_code(
         """
 def a():
@@ -99,7 +102,7 @@ def a():
     )
 
 
-def test_global_2():
+def test_global_2() -> None:
     check_code(
         """
 def a():
@@ -116,7 +119,7 @@ def a():
     )
 
 
-def test_global_3():
+def test_global_3() -> None:
     check_code(
         """
 def a():
@@ -133,7 +136,7 @@ def a():
     )
 
 
-def test_global_4():
+def test_global_4() -> None:
     check_code(
         """
 
@@ -156,7 +159,7 @@ def a():
     )
 
 
-def test_global_5():
+def test_global_5() -> None:
     check_code(
         """
 def name_4():
@@ -173,7 +176,7 @@ def name_4():
     )
 
 
-def test_nonlocal_0():
+def test_nonlocal_0() -> None:
     check_code(
         """
 def b():
@@ -191,7 +194,7 @@ def b():
     )
 
 
-def test_nonlocal_1():
+def test_nonlocal_1() -> None:
     check_code(
         """
 def b():
@@ -211,7 +214,7 @@ def b():
     )
 
 
-def test_nonlocal_2():
+def test_nonlocal_2() -> None:
     check_code(
         """
 def b():
@@ -233,7 +236,7 @@ def b():
     )
 
 
-def test_nonlocal_3():
+def test_nonlocal_3() -> None:
     check_code(
         """
 def b():
@@ -255,7 +258,7 @@ def b():
     )
 
 
-def test_nonlocal_4():
+def test_nonlocal_4() -> None:
     check_code(
         """
 def b():
@@ -277,7 +280,7 @@ def b():
     )
 
 
-def test_nonlocal_5():
+def test_nonlocal_5() -> None:
     if sys.version_info >= (3, 12):
         check_code(
             """

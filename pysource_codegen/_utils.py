@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import ast
 import sys
-from typing import Callable
-from typing import Hashable
-from typing import Iterator
-from typing import List
-from typing import TypeVar
-from typing import Union
+
+__all__ = [
+    "ast_dump",
+    "arguments",
+    "walk_until",
+    "walk_childs_first",
+    "walk_function_nodes",
+    "equal_ast",
+    "only_firstone",
+    "unique_by",
+    "unparse",
+]
+from typing import Callable, Hashable, Iterator, List, TypeVar, Union, Any
 
 # Recursive value type used in AST comparisons: can be an AST node, a list of
 # values, or a primitive leaf value. We use a forward reference for the list
@@ -30,21 +37,21 @@ def arguments(
     node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
 ) -> list[ast.arg]:
     args = node.args
-    l: list[ast.arg | None] = [
+    lst: list[ast.arg | None] = [
         *args.args,
         args.vararg,
         *args.kwonlyargs,
         args.kwarg,
     ]
 
-    l += args.posonlyargs
+    lst += args.posonlyargs
 
-    return [arg for arg in l if arg is not None]  # type: ignore[return-value]
+    return [arg for arg in lst if arg is not None]
 
 
 def walk_until(
-    node: ast.AST | list, stop: type | tuple[type, ...]
-) -> Iterator[ast.AST | list]:
+    node: ast.AST | list[Any], stop: type | tuple[type, ...]
+) -> Iterator[ast.AST | list[Any]]:
     if isinstance(node, stop):
         return
     yield node
@@ -62,7 +69,7 @@ def walk_childs_first(node: ast.AST) -> Iterator[ast.AST]:
         yield e
 
 
-def walk_function_nodes(node: ast.AST | list) -> Iterator[ast.AST | list]:
+def walk_function_nodes(node: ast.AST | list[Any]) -> Iterator[ast.AST | list[Any]]:
     if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
         for argument in arguments(node):
             if argument.annotation:
@@ -94,7 +101,8 @@ def equal_ast(
     print: Callable[..., None] = lambda *args: None,
     t: str = "root",
 ) -> bool:
-    if type(lhs) != type(rhs):
+
+    if type(lhs) is not type(rhs):
         print(t, lhs, "!=", rhs)
         return False
 
@@ -105,8 +113,8 @@ def equal_ast(
             return False
 
         return all(
-            equal_ast(l, r, print, t + f"[{i}]")
-            for i, (l, r) in enumerate(zip(lhs, rhs))
+            equal_ast(l_item, r_item, print, t + f"[{i}]")
+            for i, (l_item, r_item) in enumerate(zip(lhs, rhs))
         )
 
     elif isinstance(lhs, ast.AST):
@@ -123,14 +131,15 @@ def equal_ast(
 T = TypeVar("T")
 
 
-def only_firstone(l: list[T], condition: Callable[[T], bool]) -> None:
+def only_firstone(lst: list[T], condition: Callable[[T], bool]) -> None:
     found = False
-    for i, e in reversed(list(enumerate(l))):
+    for i, e in reversed(list(enumerate(lst))):
         if condition(e):
             if found:
-                del l[i]
+                del lst[i]
             found = True
 
 
-def unique_by(l: list[T], key: Callable[[T], Hashable]) -> list[T]:
-    return list({key(e): e for e in l}.values())
+def unique_by(lst: list[T], key: Callable[[T], Hashable]) -> list[T]:
+    return list({key(e): e for e in lst}.values())
+    # Added return type for clarity

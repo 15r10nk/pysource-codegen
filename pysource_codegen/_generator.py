@@ -88,7 +88,7 @@ class AstGenerator:
         """
         raise Invalid
 
-    def same_length(self) -> dict:
+    def same_length(self) -> dict[str, list[str]]:
         return {}
 
     def min_attr_length(self, type_name: str, attr_name: str) -> int:
@@ -114,43 +114,34 @@ class AstGenerator:
     def is_valid_ast(
         self, tree: ast.AST, print: Callable[..., None] = lambda *args: None
     ) -> bool:
-        def is_valid(node: ast.AST, parents):
+        from typing import Sequence
+
+        def is_valid(node: ast.AST, parents: Sequence[tuple[str, str]]) -> bool:
             type_name = node.__class__.__name__
             if (
-                isinstance(node, (ast.AST))
+                isinstance(node, ast.AST)
                 and parents
-                and self.probability(
-                    parents,
-                    type_name,
-                )
-                == 0
+                and self.probability(parents, type_name) == 0
             ):
                 print("invalid node with:")
                 print("parents:", parents)
                 print("node:", node)
-
                 try:
-                    self.probability_try(
-                        parents,
-                        node.__class__.__name__,
-                    )
+                    self.probability_try(parents, node.__class__.__name__)
                 except Invalid:
                     frame = traceback.extract_tb(sys.exc_info()[2])[1]
                     print("file:", f"{frame.filename}:{frame.lineno}")
-
                 return False
 
             same_length = self.same_length()
-
             if type_name in same_length:
                 attrs = same_length[type_name]
                 if len({len(v) for k, v in ast.iter_fields(node) if k in attrs}) != 1:
                     return False
 
-            if isinstance(node, (ast.AST)):
+            if isinstance(node, ast.AST):
                 info = get_info(type_name)
                 assert isinstance(info, NodeType)
-
                 for attr_name, value in ast.iter_fields(node):
                     assert attr_name in info.fields, f"{attr_name} missing in {info}"
                     attr_info = info.fields[attr_name]
@@ -163,13 +154,11 @@ class AstGenerator:
                                 )
                                 print("parents are:", parents)
                                 return False
-
                     if isinstance(value, list) and len(value) < self.min_attr_length(
                         type_name, attr_name
                     ):
                         print("invalid arg length", type_name, attr_name)
                         return False
-
                     if isinstance(value, list) != ("*" in info.fields[attr_name][1]):
                         print(f"no list (info {info.fields[attr_name]})")
                         return False

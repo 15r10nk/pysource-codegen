@@ -63,7 +63,7 @@ extra-dependencies = [
 ]
 
 [tool.hatch.envs.types.scripts]
-check = "mypy --install-types --non-interactive {args:pysource_codegen tests}"
+check = "mypy --install-types --strict --non-interactive {args:pysource_codegen tests}"
 
 [tool.hatch.envs.cog]
 dependencies=["cogapp","lxml","requests"]

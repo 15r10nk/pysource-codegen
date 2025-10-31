@@ -39,7 +39,7 @@ def all_args(args: ast.arguments) -> tuple[list[ast.arg], ...]:
 
 class StdGenerator(AstGenerator):
 
-    def use(self):
+    def use(self) -> bool:
         """
         this function is mocked in test_valid_source to ignore some decisions
         which are usually made by the algo.
@@ -969,7 +969,7 @@ class StdGenerator(AstGenerator):
 
         return node
 
-    def fix_result(self, node):
+    def fix_result(self, node: ast.AST) -> ast.AST:
         if sys.version_info >= (3, 14):
             for n in walk_childs_first(node):
                 if self.use() and isinstance(n, ast.Interpolation):
@@ -988,7 +988,7 @@ class StdGenerator(AstGenerator):
 
         return self.fix_nonlocal(node)
 
-    def fix_nonlocal(self, node):
+    def fix_nonlocal(self, node: ast.AST) -> ast.AST:
         class NonLocalFixer(ast.NodeTransformer):
             """
             removes invalid Nonlocals from the class/function
@@ -1037,7 +1037,7 @@ class StdGenerator(AstGenerator):
                         self.name_assigned(node.name)
                     return node
 
-            def search_walrus(self, node):
+            def search_walrus(self, node: ast.AST) -> None:
                 for n in ast.walk(node):
                     if isinstance(n, ast.NamedExpr):
                         self.visit(n.target)
@@ -1152,7 +1152,7 @@ class StdGenerator(AstGenerator):
 
                 return node
 
-            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
                 self.name_assigned(node.name)
 
                 all_nodes = [
