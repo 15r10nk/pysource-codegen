@@ -16,12 +16,25 @@ logfire.configure()
 logfire.instrument_pydantic_ai()
 
 
+# Global project root
+project_root = Path(__file__).parent.resolve()
+
+
 # Agent for code editing
 def get_api_key() -> str:
     api_key = os.environ.get("XAI_API_KEY")
     if not api_key:
         raise RuntimeError("Environment variable XAI_API_KEY is not set.")
     return api_key
+
+
+def is_within_project_root(path: Path) -> bool:
+    try:
+        if not str(path.resolve()).startswith(str(project_root)):
+            raise ValueError(f"Access denied: {path} is outside the project directory.")
+        return True
+    except Exception:
+        return False
 
 
 agent = Agent(
@@ -61,7 +74,6 @@ async def read_code(
     Reads the code of `filename`. A `line_range` can be provided to limit the output to the needed lines.
     You can only read files inside this project directory
     """
-    project_root = Path(__file__).parent.resolve()
     file_path = (
         (project_root / filename).resolve()
         if not os.path.isabs(filename)
@@ -69,7 +81,7 @@ async def read_code(
     )
     try:
         # Ensure file is inside project directory
-        if not str(file_path).startswith(str(project_root)):
+        if not is_within_project_root(file_path):
             return f"Access denied: {filename} is outside the project directory."
         if line_range is not None:
             start, end = line_range
@@ -88,11 +100,17 @@ async def write_code(ctx: RunContext, filename: str, text: str) -> str:
     Write `text` into `filename`.
     You can only write to files inside pysource_codegen.
     """
-    project_root = Path(__file__).parent.resolve()
-    file_path = (project_root / filename).resolve()
+    pysource_dir = project_root / "pysource_codegen"
+    file_path = (
+        (pysource_dir / filename).resolve()
+        if not os.path.isabs(filename)
+        else Path(filename).resolve()
+    )
     try:
-        # Ensure file is inside pysource_codegen
-        if not str(file_path).startswith(str(project_root / "pysource_codegen")):
+        # Ensure file is inside pysource_codegen and project root
+        if not is_within_project_root(file_path) or not str(file_path).startswith(
+            str(pysource_dir)
+        ):
             return f"Access denied: {filename} is outside pysource_codegen."
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(text, encoding="utf-8")
@@ -107,17 +125,20 @@ async def list_files(ctx: RunContext, directory: Optional[str] = None) -> list[s
     List files in the given directory (relative to project root).
     You can only list files inside this project directory.
     """
-    project_root = Path(__file__).parent.resolve()
-    dir_path = (project_root / directory).resolve() if directory else project_root
-    try:
-        # Ensure directory is inside project root
-        if not str(dir_path).startswith(str(project_root)):
-            return [f"Access denied: {dir_path} is outside the project directory."]
-        return [
-            str(p.relative_to(project_root)) for p in dir_path.rglob("*") if p.is_file()
-        ]
-    except Exception as e:
-        return [f"Error listing files in {dir_path}: {e}"]
+    files = (
+        subprocess.run(
+            "git ls-files --others --exclude-standard --cached".split(),
+            capture_output=True,
+        )
+        .stdout.decode()
+        .splitlines()
+    )
+    files = [
+        file
+        for file in files
+        if "samples/" not in file and file.startswith(directory or "")
+    ]
+    return files
 
 
 if __name__ == "__main__":
@@ -126,7 +147,7 @@ if __name__ == "__main__":
     async def main() -> None:
         result = await agent.run(
             "run the tests and explain the problems to me.",
-            usage_limits=UsageLimits(response_tokens_limit=100_000),
+            usage_limits=UsageLimits(response_tokens_limit=100000),
         )
         print(result.output)
 

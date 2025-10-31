@@ -20,6 +20,7 @@ tree = Module(
                     bases=[],
                     keywords=[
                         keyword(
+                            arg="foo",
                             value=GeneratorExp(
                                 elt=Name(id="name_5", ctx=Load()),
                                 generators=[
@@ -30,7 +31,7 @@ tree = Module(
                                         is_async=1,
                                     )
                                 ],
-                            )
+                            ),
                         )
                     ],
                     body=[Nonlocal(names=["name_2"])],
