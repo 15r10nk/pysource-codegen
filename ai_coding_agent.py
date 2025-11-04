@@ -6,7 +6,6 @@ from typing import Tuple
 
 import logfire
 from pydantic_ai import Agent
-from pydantic_ai import RunContext
 from pydantic_ai import UsageLimits
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.grok import GrokProvider
@@ -28,13 +27,11 @@ def get_api_key() -> str:
     return api_key
 
 
-def is_within_project_root(path: Path) -> bool:
-    try:
-        if not str(path.resolve()).startswith(str(project_root)):
-            raise ValueError(f"Access denied: {path} is outside the project directory.")
-        return True
-    except Exception:
-        return False
+def to_path(path: str) -> Path:
+    result = (project_root / path).resolve()
+    if not str(result).startswith(str(project_root)):
+        raise ValueError(f"Access denied: {path} is outside the project directory.")
+    return result
 
 
 agent = Agent(
@@ -49,40 +46,51 @@ agent = Agent(
 )
 
 
-@agent.tool
-async def run_tests(ctx: RunContext) -> str:
+def run_tests_in_subprocess():
+    return subprocess.run(
+        ["uv", "run", "-p", "3.14.0", "-m", "unittest"],
+        capture_output=True,
+        check=False,
+    )
+
+
+@agent.tool_plain
+async def run_tests() -> str:
     """
     Runs the test suite using uv and returns the combined output.
     """
     try:
-        result = subprocess.run(
-            ["uv", "run", "-p", "3.14.0", "-m", "unittest"],
-            capture_output=True,
-            check=False,
-        )
+        result = run_tests_in_subprocess()
         output = result.stdout + result.stderr
         return output.decode(errors="replace")
     except Exception as e:
         return f"Error running tests: {e}"
 
 
-@agent.tool
-async def read_code(
-    ctx: RunContext, filename: str, line_range: Optional[Tuple[int, int]] = None
-) -> str:
+@agent.tool_plain
+async def check_types() -> str:
+    """
+    check the types with mypy
+    """
+    try:
+        result = subprocess.run("hatch run types:check".split(), capture_output=True)
+        if result.returncode == 0:
+            return "<there are no type errors>"
+
+        output = result.stdout + result.stderr
+        return output.decode(errors="replace")
+    except Exception as e:
+        return f"Error running tests: {e}"
+
+
+@agent.tool_plain
+async def read_code(filename: str, line_range: Optional[Tuple[int, int]] = None) -> str:
     """
     Reads the code of `filename`. A `line_range` can be provided to limit the output to the needed lines.
     You can only read files inside this project directory
     """
-    file_path = (
-        (project_root / filename).resolve()
-        if not os.path.isabs(filename)
-        else Path(filename).resolve()
-    )
+    file_path = to_path(filename)
     try:
-        # Ensure file is inside project directory
-        if not is_within_project_root(file_path):
-            return f"Access denied: {filename} is outside the project directory."
         if line_range is not None:
             start, end = line_range
             with open(file_path, encoding="utf-8") as f:
@@ -94,24 +102,14 @@ async def read_code(
         return f"Error reading file {filename}: {e}"
 
 
-@agent.tool
-async def write_code(ctx: RunContext, filename: str, text: str) -> str:
+@agent.tool_plain
+async def write_code(filename: str, text: str) -> str:
     """
     Write `text` into `filename`.
     You can only write to files inside pysource_codegen.
     """
-    pysource_dir = project_root / "pysource_codegen"
-    file_path = (
-        (pysource_dir / filename).resolve()
-        if not os.path.isabs(filename)
-        else Path(filename).resolve()
-    )
+    file_path = to_path(filename)
     try:
-        # Ensure file is inside pysource_codegen and project root
-        if not is_within_project_root(file_path) or not str(file_path).startswith(
-            str(pysource_dir)
-        ):
-            return f"Access denied: {filename} is outside pysource_codegen."
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(text, encoding="utf-8")
         return f"Successfully wrote to {filename}."
@@ -119,8 +117,8 @@ async def write_code(ctx: RunContext, filename: str, text: str) -> str:
         return f"Error writing to file {filename}: {e}"
 
 
-@agent.tool
-async def list_files(ctx: RunContext, directory: Optional[str] = None) -> list[str]:
+@agent.tool_plain
+async def list_files(directory: Optional[str] = None) -> list[str]:
     """
     List files in the given directory (relative to project root).
     You can only list files inside this project directory.
@@ -145,10 +143,12 @@ if __name__ == "__main__":
     import asyncio
 
     async def main() -> None:
-        result = await agent.run(
-            "run the tests and explain the problems to me.",
-            usage_limits=UsageLimits(response_tokens_limit=100000),
-        )
-        print(result.output)
+
+        if run_tests_in_subprocess().returncode != 0:
+            result = await agent.run(
+                "run the tests and explain the problems to me.",
+                usage_limits=UsageLimits(response_tokens_limit=10000),
+            )
+            print(result.output)
 
     asyncio.run(main())

@@ -16,6 +16,7 @@ from ._utils import walk_childs_first
 from ._utils import walk_function_nodes
 from pysource_codegen._generator import AstGenerator
 from pysource_codegen._generator import Invalid
+from pysource_codegen._generator import NodeRef
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
@@ -49,7 +50,7 @@ class StdGenerator(AstGenerator):
         return True
 
     def probability_try(
-        self, parents: Sequence[tuple[str, str]], child_name: str
+        self, parent: NodeRef, parents: Sequence[tuple[str, str]], child_name: str
     ) -> float:
         parent_types = [p[0] for p in parents]
 
@@ -406,7 +407,15 @@ class StdGenerator(AstGenerator):
 
         return 1
 
-    def fix(self, node: ast.AST, parents: list[tuple[str, str]]) -> ast.AST:
+    def fix(
+        self, node: ast.AST, parent_node: NodeRef, parents: list[tuple[str, str]]
+    ) -> ast.AST:
+
+        assert parent_node.all_parents() == parents, (
+            parent_node.all_parents(),
+            parents,
+        )
+
         if isinstance(node, ast.ImportFrom):
             if self.use() and not py310plus and node.level is None:
                 node.level = 0
@@ -1362,7 +1371,7 @@ class StdGenerator(AstGenerator):
 
         return 0
 
-    def none_allowed(self, parents: Sequence[tuple[str, str]]) -> bool:
+    def none_allowed(self, parent: NodeRef, parents: Sequence[tuple[str, str]]) -> bool:
         if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
             return False
         return True

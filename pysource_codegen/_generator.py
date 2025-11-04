@@ -6,6 +6,7 @@ import sys
 import traceback
 from copy import deepcopy
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Callable
 from typing import Sequence
 from typing import Union
@@ -31,10 +32,10 @@ class Context:
 
 @dataclass
 class NodeRef:
-    parent: NodeRef | None
-    parent_attr: str
-    parent_attr_index: int | None
-    node: ast.AST
+    parent: NodeRef | None = None
+    parent_attr: str = ""
+    parent_attr_index: int | None = None
+    node: ast.AST | None = None
 
     def __getattr__(self, name: str) -> NodeRef | list[NodeRef] | None:
         value = getattr(self.node, name)
@@ -44,14 +45,29 @@ class NodeRef:
             return None
         return NodeRef(self, name, None, value)
 
+    def all_parents(self: NodeRef) -> list[tuple[str, str]]:
+        if self.parent is None:
+            return []
+        else:
+            return self.parent.all_parents() + [
+                (type(self.parent.node).__name__, self.parent_attr),
+            ]
+
+    def is_node(self, node):
+        assert self.node is None, self
+        return replace(self, node=node)
+
+    def unknown_attr(self, attr, index=None):
+        return NodeRef(self, attr, index, None)
+
+    def new_child(self, value, attr_name, index=None):
+        return NodeRef(self, attr_name, index, value)
+
 
 def parents_of(node: NodeRef | None) -> list[tuple[str, str]]:
-    if node is None or node.parent is None:
-        return []
-    else:
-        return parents_of(node.parent) + [
-            (type(node.parent.node).__name__, node.parent_attr),
-        ]
+    if node:
+        return node.all_parents()
+    return []
 
 
 class AstGenerator:
@@ -78,7 +94,9 @@ class AstGenerator:
         raise NotImplementedError
 
     # --- helper stubs so static type checkers know these exist ---
-    def probability_try(self, parents: list[tuple[str, str]], child_name: str) -> float:
+    def probability_try(
+        self, parent: NodeRef, parents: list[tuple[str, str]], child_name: str
+    ) -> float:
         """Return probability for child_name given parents or raise Invalid.
 
         Real implementations live elsewhere; default raises Invalid to signal
@@ -92,38 +110,50 @@ class AstGenerator:
     def min_attr_length(self, type_name: str, attr_name: str) -> int:
         return 0
 
-    def none_allowed(self, parents: list[tuple[str, str]]) -> bool:
+    def none_allowed(self, parent: NodeRef, parents: list[tuple[str, str]]) -> bool:
         return True
 
-    def fix(self, node: ast.AST, parents: list[tuple[str, str]]) -> ast.AST:
+    def fix(
+        self, node: ast.AST, parent: NodeRef, parents: list[tuple[str, str]]
+    ) -> ast.AST:
         return node
 
     def use(self) -> bool:
         return True
 
-    def probability(self, parents: list[tuple[str, str]], child_name: str) -> float:
+    def probability(
+        self, parent: NodeRef, parents: list[tuple[str, str]], child_name: str
+    ) -> float:
         try:
-            return self.probability_try(parents, child_name)
+            return self.probability_try(parent, parents, child_name)
         except Invalid:
             return 0
+
+    def context_before(
+        self, context: Context | None, node: NodeRef, attr: str, index: int | None
+    ) -> Context | None:
+        pass
+
+    def context_after(self, context: Context | None, node: NodeRef) -> Context | None:
+        pass
 
     def is_valid_ast(
         self, tree: ast.AST, print: Callable[..., None] = lambda *args: None
     ) -> bool:
-        pass
+        parent_node = NodeRef(None, "", None, tree)
 
         def is_valid(node: ast.AST, parents: list[tuple[str, str]]) -> bool:
             type_name = node.__class__.__name__
             if (
                 isinstance(node, ast.AST)
                 and parents
-                and self.probability(parents, type_name) == 0
+                and self.probability(parent_node, parents, type_name) == 0
             ):
                 print("invalid node with:")
                 print("parents:", parents)
                 print("node:", node)
                 try:
-                    self.probability_try(parents, node.__class__.__name__)
+                    self.probability_try(parent_node, parents, node.__class__.__name__)
                 except Invalid:
                     frame = traceback.extract_tb(sys.exc_info()[2])[1]
                     print("file:", f"{frame.filename}:{frame.lineno}")
@@ -163,7 +193,7 @@ class AstGenerator:
                             (
                                 info.fields[attr_name][1] == "?"
                                 and self.none_allowed(
-                                    parents + [(type_name, attr_name)]
+                                    parent_node, parents + [(type_name, attr_name)]
                                 )
                             )
                             or info.fields[attr_name][0] == "constant"
@@ -186,14 +216,18 @@ class AstGenerator:
         if not is_valid(tree, []):
             return False
 
-        def fix_tree(node: ast.AST, parents):
+        def fix_tree(node: ast.AST, parent_node: NodeRef, parents):
             for field in node._fields:
                 value = getattr(node, field)
                 if isinstance(value, ast.AST):
                     setattr(
                         node,
                         field,
-                        fix_tree(value, parents + [(node.__class__.__name__, field)]),
+                        fix_tree(
+                            value,
+                            parent_node.is_node(node).unknown_attr(field),
+                            parents + [(node.__class__.__name__, field)],
+                        ),
                     )
                 if isinstance(value, list):
                     setattr(
@@ -202,7 +236,9 @@ class AstGenerator:
                         [
                             (
                                 fix_tree(
-                                    v, parents + [(node.__class__.__name__, field)]
+                                    v,
+                                    parent_node.is_node(node).unknown_attr(field),
+                                    parents + [(node.__class__.__name__, field)],
                                 )
                                 if isinstance(v, ast.AST)
                                 else v
@@ -211,7 +247,7 @@ class AstGenerator:
                         ],
                     )
 
-            return self.fix(node, parents)
+            return self.fix(node, parent_node, parents)
 
         def check_if_changed(tree, tree_copy, operation):
             result = equal_ast(tree_copy, tree, print)
@@ -232,7 +268,7 @@ class AstGenerator:
 
         tree_copy = deepcopy(tree)
 
-        tree_copy = fix_tree(tree_copy, [])
+        tree_copy = fix_tree(tree_copy, NodeRef(), [])
         if not check_if_changed(tree, tree_copy, "fix_tree"):
             return False
 
@@ -250,25 +286,20 @@ class AstGenerator:
             result = node
             return NodeRef(None, "", None, node)
 
-        self.generate_impl(place, None, ast_type_name, [], depth)
+        parent_node = NodeRef(None, "", None, None)
+
+        self.generate_impl(place, parent_node, ast_type_name, [], depth)
+
         assert result is not None
 
-        self.fix(result, [])
+        self.fix(result, parent_node, [])
         result = self.fix_result(result)
         return result
-
-    def context_before(
-        self, context: Context | None, node: NodeRef, attr: str, index: int | None
-    ) -> Context | None:
-        pass
-
-    def context_after(self, context: Context | None, node: NodeRef) -> Context | None:
-        pass
 
     def generate_NodeType(
         self,
         place: Callable[[GeneratedValue], NodeRef],
-        parent_node: NodeRef | None,
+        parent_node: NodeRef,
         info: NodeType,
         ast_type_name: str,
         parents: Sequence[tuple[str, str]],
@@ -324,7 +355,11 @@ class AstGenerator:
             new_parents = [*parents, (ast_type_name, attr_name)]
 
             def gen():
-                if "?" in quantity and self.none_allowed(new_parents) and self.cnd():
+                if (
+                    "?" in quantity
+                    and self.none_allowed(new_node, new_parents)
+                    and self.cnd()
+                ):
                     child_place(None)
                 else:
                     self.generate_impl(
@@ -340,25 +375,38 @@ class AstGenerator:
             value = getattr(new_result, attr_name)
             if isinstance(value, list):
                 setattr(
-                    new_result, attr_name, [self.fix(v, new_parents) for v in value]
+                    new_result,
+                    attr_name,
+                    [
+                        self.fix(v, new_node.new_child(v, attr_name, i), new_parents)
+                        for i, v in enumerate(value)
+                    ],
                 )
             else:
-                setattr(new_result, attr_name, self.fix(value, new_parents))
+                setattr(
+                    new_result,
+                    attr_name,
+                    self.fix(value, new_node.new_child(value, attr_name), new_parents),
+                )
 
     def generate_UnionNodeType(
         self,
         place: Callable[[GeneratedValue], NodeRef],
-        parent_node: NodeRef | None,
+        parent_node: NodeRef,
         info: UnionNodeType,
         ast_type_name: str,
         parents: list[tuple[str, str]],
         depth: int,
         stop: bool,
     ) -> None:
-        # assert parents==parents_of(parent_node),(parents,parents_of(parent_node))
+        assert parents[:-1] == parent_node.all_parents(), (
+            parents,
+            parents_of(parent_node),
+        )
 
         options_list = [
-            (option, self.probability(parents, option)) for option in info.options
+            (option, self.probability(parent_node, parents, option))
+            for option in info.options
         ]
 
         # check if an invalid can actually be valid (test_valid_source.py)
@@ -401,6 +449,7 @@ class AstGenerator:
         depth: int,
         stop: bool,
     ) -> None:
+
         result: str | int | float | bytes | bool | None
         if info.kind == "identifier":
             result = f"name_{self.rand.randint(0,5)}"
@@ -438,7 +487,7 @@ class AstGenerator:
     def generate_impl(
         self,
         place: Callable[[GeneratedValue], NodeRef],
-        parent_node: NodeRef | None,
+        parent_node: NodeRef,
         ast_type_name: str,
         parents: Sequence[tuple[str, str]] = (),
         depth: int = 0,
