@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import itertools
 import sys
-from dataclasses import replace
 from typing import Callable
 from typing import Iterable
 from typing import Sequence
@@ -40,6 +39,116 @@ def all_args(args: ast.arguments) -> tuple[list[ast.arg], ...]:
         return (args.args, args.kwonlyargs)
 
 
+if sys.version_info >= (3, 10):
+
+    def match_wildcard(node: ast.AST) -> bool:
+        if isinstance(node, ast.MatchAs):
+            return (
+                node.pattern is None
+                or match_wildcard(node.pattern)
+                or node.name is None
+            )
+        if isinstance(node, ast.MatchOr):
+            return any(match_wildcard(p) for p in node.patterns)
+
+        # default: not a wildcard
+        return False
+
+    # @lambda f:lambda pattern:set(f(pattern))
+    def all_names(node: ast.AST):  # type: ignore[misc]
+        if isinstance(node, ast.MatchAs) and node.name:  # type: ignore[union-attr]
+            yield node.name  # type: ignore[union-attr]
+        elif isinstance(node, ast.MatchStar) and node.name:  # type: ignore[union-attr]
+            yield node.name  # type: ignore[union-attr]
+        elif isinstance(node, ast.MatchMapping) and node.rest:  # type: ignore[union-attr]
+            yield node.rest  # type: ignore[union-attr]
+        elif isinstance(node, ast.MatchOr):  # type: ignore[attr-defined]
+            yield from set.intersection(
+                *[set(all_names(pattern)) for pattern in node.patterns]  # type: ignore[union-attr]
+            )
+        else:
+            for child in ast.iter_child_nodes(node):
+                yield from all_names(child)
+
+    class RemoveName(ast.NodeVisitor):
+        def __init__(self, condition: Callable[[str | None], bool]) -> None:
+            self.condition = condition
+
+        def visit_MatchAs(self, node: ast.MatchAs) -> None:  # type: ignore[attr-defined]
+            if self.condition(node.name):  # type: ignore[union-attr]
+                node.name = None  # type: ignore[union-attr]
+
+        def visit_MatchMapping(self, node: ast.MatchMapping) -> None:  # type: ignore[attr-defined]
+            if self.condition(node.rest):  # type: ignore[union-attr]
+                node.rest = None  # type: ignore[union-attr]
+
+    class RemoveNameCleanup(ast.NodeTransformer):
+        def visit_MatchAs(  # type: ignore[attr-defined]
+            self, node: ast.MatchAs
+        ) -> ast.AST | list[ast.AST] | None:
+            if node.name is None and node.pattern is not None:  # type: ignore[union-attr]
+                return self.visit(node.pattern)  # type: ignore[union-attr]
+            return self.generic_visit(node)
+
+    class FixPatternNames(ast.NodeTransformer):
+        def __init__(
+            self, used: set[str] | None = None, allowed: set[str] | None = None
+        ) -> None:
+            # variables which are already used
+            self.used: set[str] = set() if used is None else set(used)
+            # variables which are allowed in a MatchOr
+            self.allowed: set[str] | None = allowed
+
+        def is_allowed(self, name: str | None) -> bool:
+            return (
+                name is None
+                or name not in self.used
+                and (name in self.allowed if self.allowed is not None else True)
+            )
+
+        def visit_MatchAs(  # type: ignore[attr-defined]
+            self, node: ast.MatchAs
+        ) -> ast.AST | list[ast.AST] | None:
+            if not self.is_allowed(node.name):  # type: ignore[union-attr]
+                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
+            elif node.name is not None:  # type: ignore[union-attr]
+                self.used.add(node.name)  # type: ignore[union-attr]
+            return self.generic_visit(node)
+
+        def visit_MatchStar(  # type: ignore[attr-defined]
+            self, node: ast.MatchStar
+        ) -> ast.AST | list[ast.AST] | None:
+            if not self.is_allowed(node.name):  # type: ignore[union-attr]
+                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
+            elif node.name is not None:  # type: ignore[union-attr]
+                self.used.add(node.name)  # type: ignore[union-attr]
+            return self.generic_visit(node)
+
+        def visit_MatchMapping(  # type: ignore[attr-defined]
+            self, node: ast.MatchMapping
+        ) -> ast.AST | list[ast.AST] | None:
+            if not self.is_allowed(node.rest):  # type: ignore[union-attr]
+                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
+            elif node.rest is not None:  # type: ignore[union-attr]
+                self.used.add(node.rest)  # type: ignore[union-attr]
+            return self.generic_visit(node)
+
+        def visit_MatchOr(self, node: ast.MatchOr) -> ast.MatchOr:  # type: ignore[attr-defined]
+            allowed = set.intersection(
+                *[set(all_names(pattern)) for pattern in node.patterns]  # type: ignore[union-attr]
+            )
+            allowed -= self.used
+
+            node.patterns = [  # type: ignore[union-attr]
+                FixPatternNames(set(self.used), allowed).visit(child)  # type: ignore[arg-type]
+                for child in node.patterns  # type: ignore[union-attr]
+            ]
+
+            self.used |= allowed
+
+            return node
+
+
 class StdGenerator(AstGenerator):
 
     def use(self) -> bool:
@@ -56,22 +165,6 @@ class StdGenerator(AstGenerator):
     ) -> float:
         parents = node.all_parents()
         parent_types = [p[0] for p in parents]
-
-        def inside(
-            types: str | tuple[str, ...], not_types: tuple[str, ...] = ()
-        ) -> bool:
-            if not isinstance(types, tuple):
-                types = (types,)
-
-            for parent, arg in reversed(parents):
-                qual_parent = f"{parent}.{arg}"
-                if any(qual_parent == t if "." in t else parent == t for t in types):
-                    return True
-                if any(
-                    qual_parent == t if "." in t else parent == t for t in not_types
-                ):
-                    return False
-            return False
 
         if child_name in ("Store", "Del", "Load"):
             return 1
@@ -129,10 +222,7 @@ class StdGenerator(AstGenerator):
             # see https://github.com/python/cpython/issues/111257
             raise Invalid
 
-        if inside(
-            ("Delete.targets"),
-            ("Subscript.value", "Subscript.slice", "Attribute.value"),
-        ) and child_name not in (
+        if context.in_delete_target and child_name not in (
             "Name",
             "Attribute",
             "Subscript",
@@ -142,34 +232,21 @@ class StdGenerator(AstGenerator):
             raise Invalid
 
         # function statements
-        if child_name in (
-            "Return",
-            "Yield",
-            "YieldFrom",
-        ) and not inside(
-            ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"),
-            ("ClassDef.body",),
+        if (
+            child_name
+            in (
+                "Return",
+                "Yield",
+                "YieldFrom",
+            )
+            and not context.in_function
         ):
             raise Invalid
         # function statements
-        if child_name in ("Nonlocal",) and not inside(
-            (
-                "FunctionDef.body",
-                "AsyncFunctionDef.body",
-                "Lambda.body",
-                "ClassDef.body",
-            )
-        ):
+        if child_name in ("Nonlocal",) and not context.in_function_or_class:
             raise Invalid
 
-        if (
-            not py38plus
-            and child_name == "Continue"
-            and inside(
-                ("Try.finalbody", "TryStar.finalbody"),
-                ("FunctionDef.body", "AsyncFunctionDef.body"),
-            )
-        ):
+        if not py38plus and child_name == "Continue" and context.in_finally:
             raise Invalid
 
         if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
@@ -210,7 +287,7 @@ class StdGenerator(AstGenerator):
             if child_name in ("Starred", "List", "Tuple"):
                 raise Invalid
 
-        if inside(("AnnAssign.target",)) and child_name == "Starred":
+        if context.in_ann_assign_target and child_name == "Starred":
             # TODO this might be a cpython bug
             raise Invalid
 
@@ -233,11 +310,11 @@ class StdGenerator(AstGenerator):
         if child_name in ("Break", "Continue") and not context.in_loop:
             raise Invalid
 
-        if inside("TryStar.handlers") and child_name in ("Break", "Continue", "Return"):
+        if context.in_trystar_handler and child_name in ("Break", "Continue", "Return"):
             # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
             raise Invalid
 
-        if inside(("MatchValue",)) and child_name not in (
+        if context.in_match_value and child_name not in (
             "Attribute",
             "Name",
             "Constant",
@@ -246,41 +323,37 @@ class StdGenerator(AstGenerator):
         ):
             raise Invalid
 
-        if (
-            inside("MatchValue.value")
-            and inside("Attribute.value")
-            and child_name not in ("Attribute", "Name")
+        if context.in_match_value_attr_chain and child_name not in (
+            "Attribute",
+            "Name",
         ):
             raise Invalid
 
-        if (
-            inside(("MatchValue",))
-            and inside(("UnaryOp",))
-            and child_name in ("Name", "UnaryOp", "Attribute")
+        if context.in_match_value_unaryop and child_name in (
+            "Name",
+            "UnaryOp",
+            "Attribute",
         ):
             raise Invalid
 
         if parents[-1] == ("MatchValue", "value") and child_name == "Name":
             raise Invalid
 
-        if inside("MatchClass.cls"):
+        if context.in_match_class_cls:
             if child_name not in ("Name", "Attribute"):
                 raise Invalid
 
         if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
             raise Invalid
 
-        if inside(comprehensions) and child_name in ("Yield", "YieldFrom"):
+        if context.in_comprehension and child_name in ("Yield", "YieldFrom"):
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
 
         if (
-            inside(comprehensions)
+            context.in_comprehension
             # TODO restrict to comprehension inside ClassDef
-            and inside(
-                "ClassDef.body",
-                ("FunctionDef.body", "AsyncFunctionDef.body", "Lambda.body"),
-            )
+            and context.in_class_not_function
             and child_name == "NamedExpr"
         ):
             # SyntaxError: assignment expression within a comprehension cannot be used in a class body
@@ -313,66 +386,46 @@ class StdGenerator(AstGenerator):
 
             if (
                 child_name == "Lambda"
-                and inside("TypeAlias.value")
-                and inside("ClassDef.body")
+                and context.in_type_alias_in_class
                 and sys.version_info < (3, 13)
             ):
                 # SyntaxError('Cannot use lambda in annotation scope within class scope')
                 raise Invalid
 
-            if child_name in (
-                # "NamedExpr",
-                "Yield",
-                "YieldFrom",
-                "Await",
-                # "DictComp",
-                # "ListComp",
-                # "SetComp",
-            ) and inside(
-                (
-                    "ClassDef.bases",
-                    "ClassDef.keywords",
-                    "FunctionDef.returns",
-                    "AsyncFunctionDef.returns",
-                    "arg.annotation",
-                    "TypeAlias.value",
-                    "TypeVar.bound",
+            if (
+                child_name
+                in (
+                    # "NamedExpr",
+                    "Yield",
+                    "YieldFrom",
+                    "Await",
+                    # "DictComp",
+                    # "ListComp",
+                    # "SetComp",
                 )
+                and context.in_annotation_scope
             ):
                 # todo this should only be invalid in type scopes (when the class/def has type parameters)
                 # and only for async comprehensions
                 raise Invalid
 
-            if child_name in ("NamedExpr",) and inside(
-                ("TypeAlias.value", "TypeVar.bound")
-            ):
+            if child_name in ("NamedExpr",) and context.in_type_scope:
                 # todo this should only be invalid in type scopes (when the class/def has type parameters)
                 # and only for async comprehensions
                 raise Invalid
 
-            if child_name == "Await" and inside("AnnAssign.annotation"):
+            if child_name == "Await" and context.in_ann_assign_annotation:
                 raise Invalid
-
-            if sys.version_info < (3, 13):
-                type_alias_context = ("AsyncFunctionDef", "ClassDef")
-            else:
-                type_alias_context = ("AsyncFunctionDef",)
 
             if (
-                inside(("TypeAlias", "AnnAssign.annotation"))
-                and inside(type_alias_context)
+                (context.in_annotation_scope or context.in_ann_assign_annotation)
+                and context.in_async_code
                 and child_name in comprehensions
             ):
                 raise Invalid
 
         if sys.version_info >= (3, 14):
-            if child_name == "NamedExpr" and inside(
-                (
-                    "arg.annotation",
-                    "FunctionDef.returns",
-                    "AsyncFunctionDef.returns",
-                )
-            ):
+            if child_name == "NamedExpr" and context.in_annotation_return_scope:
                 raise Invalid
 
             if not parent_types[-1] == "TemplateStr" and child_name == "Interpolation":
@@ -402,17 +455,17 @@ class StdGenerator(AstGenerator):
         self, context: Context, node: NodeRef, attr: str, index: int | None
     ) -> Context:
         node_type = type(node.node).__name__
+        is_function_def = node_type in ("FunctionDef", "AsyncFunctionDef", "Lambda")
+        ctx = context.copy()
 
-        # --- in_async_code: mirrors inside() in probability_try ---
-        # AsyncFunctionDef.body and GeneratorExp.elt activate async context
-        if not context.in_async_code and (node_type, attr) in (
+        # --- in_async_code ---
+        if not ctx.in_async_code and (node_type, attr) in (
             ("AsyncFunctionDef", "body"),
             ("GeneratorExp", "elt"),
         ):
-            context = replace(context, in_async_code=True)
-        # FunctionDef.body, Lambda.body, ClassDef.body reset it
+            ctx.in_async_code = True
         elif (
-            context.in_async_code
+            ctx.in_async_code
             and attr == "body"
             and node_type
             in (
@@ -421,47 +474,172 @@ class StdGenerator(AstGenerator):
                 "ClassDef",
             )
         ):
-            context = replace(context, in_async_code=False)
+            ctx.in_async_code = False
 
-        # --- in_async_context: mirrors fix()'s in_async_code loop (stricter) ---
-        # Only AsyncFunctionDef.body activates; annotations/type-params/nested fns reset
+        # --- in_async_context (stricter: only AsyncFunctionDef.body activates) ---
         if node_type == "AsyncFunctionDef" and attr == "body":
-            context = replace(context, in_async_context=True)
+            ctx.in_async_context = True
         elif node_type in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
-            context = replace(context, in_async_context=False)
+            ctx.in_async_context = False
         elif (node_type, attr) in (
             ("AsyncFunctionDef", "returns"),
             ("arg", "annotation"),
             ("TypeVar", "bound"),
         ):
-            context = replace(context, in_async_context=False)
+            ctx.in_async_context = False
         elif not py311plus and node_type in comprehensions:
-            context = replace(context, in_async_context=False)
+            ctx.in_async_context = False
 
-        # --- in_loop: mirrors the inside() call in probability_try ---
-        # Entering a loop body enables in_loop
-        if attr == "body" and node_type in (
-            "For",
-            "While",
-            "AsyncFor",
-        ):
-            context = replace(context, in_loop=True)
-        # Entering a function/class body resets in_loop
-        elif attr == "body" and (node_type) in (
+        # --- in_loop ---
+        if attr == "body" and node_type in ("For", "While", "AsyncFor"):
+            ctx.in_loop = True
+        elif attr == "body" and node_type in (
             "FunctionDef",
             "Lambda",
             "AsyncFunctionDef",
             "ClassDef",
         ):
-            context = replace(context, in_loop=False)
+            ctx.in_loop = False
 
-        # --- in_excepthandler: mirrors the loop in fix() ---
+        # --- in_excepthandler ---
         if node_type == "ExceptHandler":
-            context = replace(context, in_excepthandler=True)
-        elif node_type in ("FunctionDef", "Lambda", "AsyncFunctionDef"):
-            context = replace(context, in_excepthandler=False)
+            ctx.in_excepthandler = True
+        elif is_function_def:
+            ctx.in_excepthandler = False
 
-        return context
+        # --- in_function: inside FunctionDef/AsyncFunctionDef/Lambda body, reset at ClassDef.body ---
+        if attr == "body" and is_function_def:
+            ctx.in_function = True
+        elif attr == "body" and node_type == "ClassDef":
+            ctx.in_function = False
+
+        # --- in_function_or_class: inside any function/lambda/class body ---
+        if attr == "body" and node_type in (
+            "FunctionDef",
+            "AsyncFunctionDef",
+            "Lambda",
+            "ClassDef",
+        ):
+            ctx.in_function_or_class = True
+
+        # --- in_finally: inside Try.finalbody / TryStar.finalbody, reset at function boundary ---
+        if attr == "finalbody" and node_type in ("Try", "TryStar"):
+            ctx.in_finally = True
+        elif attr == "body" and is_function_def:
+            ctx.in_finally = False
+
+        # --- in_trystar_handler: inside TryStar.handlers, reset at function boundary ---
+        if attr == "handlers" and node_type == "TryStar":
+            ctx.in_trystar_handler = True
+        elif attr == "body" and is_function_def:
+            ctx.in_trystar_handler = False
+
+        # --- in_match_value: inside a MatchValue node ---
+        if node_type == "MatchValue":
+            ctx.in_match_value = True
+
+        # --- in_match_value_attr_chain: inside MatchValue.value and also inside Attribute.value ---
+        if ctx.in_match_value and node_type == "Attribute" and attr == "value":
+            ctx.in_match_value_attr_chain = True
+        elif not ctx.in_match_value:
+            ctx.in_match_value_attr_chain = False
+
+        # --- in_match_value_unaryop: inside MatchValue AND inside a UnaryOp ---
+        if ctx.in_match_value and node_type == "UnaryOp":
+            ctx.in_match_value_unaryop = True
+        elif not ctx.in_match_value:
+            ctx.in_match_value_unaryop = False
+
+        # --- in_match_class_cls: inside MatchClass.cls ---
+        ctx.in_match_class_cls = node_type == "MatchClass" and attr == "cls"
+
+        # --- in_comprehension: inside any comprehension node ---
+        if node_type in comprehensions:
+            ctx.in_comprehension = True
+        elif is_function_def or node_type == "ClassDef":
+            ctx.in_comprehension = False
+
+        # --- in_class_not_function: inside ClassDef.body but not nested function/lambda ---
+        if attr == "body" and node_type == "ClassDef":
+            ctx.in_class_not_function = True
+        elif is_function_def:
+            ctx.in_class_not_function = False
+
+        # --- in_annotation_scope: annotation/type-alias positions where yield/await/walrus forbidden ---
+        if (node_type, attr) in (
+            ("ClassDef", "bases"),
+            ("ClassDef", "keywords"),
+            ("FunctionDef", "returns"),
+            ("AsyncFunctionDef", "returns"),
+            ("arg", "annotation"),
+            ("TypeAlias", "value"),
+            ("TypeVar", "bound"),
+        ):
+            ctx.in_annotation_scope = True
+        elif attr == "body" and node_type in (
+            "FunctionDef",
+            "AsyncFunctionDef",
+            "Lambda",
+            "ClassDef",
+        ):
+            ctx.in_annotation_scope = False
+
+        # --- in_ann_assign_annotation: inside AnnAssign.annotation ---
+        if node_type == "AnnAssign" and attr == "annotation":
+            ctx.in_ann_assign_annotation = True
+        elif attr == "body" and node_type in (
+            "FunctionDef",
+            "AsyncFunctionDef",
+            "Lambda",
+        ):
+            ctx.in_ann_assign_annotation = False
+
+        # --- in_type_alias_in_class: inside TypeAlias.value when also inside ClassDef.body ---
+        if node_type == "TypeAlias" and attr == "value" and ctx.in_class_not_function:
+            ctx.in_type_alias_in_class = True
+        elif is_function_def:
+            ctx.in_type_alias_in_class = False
+
+        # --- in_ann_assign_target: inside AnnAssign.target ---
+        ctx.in_ann_assign_target = node_type == "AnnAssign" and attr == "target"
+
+        # --- in_delete_target: inside Delete.targets, cleared once inside sub-expression ---
+        if node_type == "Delete" and attr == "targets":
+            ctx.in_delete_target = True
+        elif ctx.in_delete_target and (node_type, attr) in (
+            ("Subscript", "value"),
+            ("Subscript", "slice"),
+            ("Attribute", "value"),
+        ):
+            ctx.in_delete_target = False
+
+        # --- in_type_scope: inside TypeAlias.value or TypeVar.bound ---
+        if (node_type, attr) in (("TypeAlias", "value"), ("TypeVar", "bound")):
+            ctx.in_type_scope = True
+        elif attr == "body" and node_type in (
+            "FunctionDef",
+            "AsyncFunctionDef",
+            "Lambda",
+            "ClassDef",
+        ):
+            ctx.in_type_scope = False
+
+        # --- in_annotation_return_scope: inside arg.annotation / FunctionDef.returns / AsyncFunctionDef.returns ---
+        if (node_type, attr) in (
+            ("arg", "annotation"),
+            ("FunctionDef", "returns"),
+            ("AsyncFunctionDef", "returns"),
+        ):
+            ctx.in_annotation_return_scope = True
+        elif attr == "body" and node_type in (
+            "FunctionDef",
+            "AsyncFunctionDef",
+            "Lambda",
+            "ClassDef",
+        ):
+            ctx.in_annotation_return_scope = False
+
+        return ctx
 
     def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
 
@@ -654,19 +832,6 @@ class StdGenerator(AstGenerator):
         # pattern matching
         if sys.version_info >= (3, 10):
 
-            def match_wildcard(node: ast.AST) -> bool:
-                if isinstance(node, ast.MatchAs):
-                    return (
-                        node.pattern is None
-                        or match_wildcard(node.pattern)
-                        or node.name is None
-                    )
-                if isinstance(node, ast.MatchOr):
-                    return any(match_wildcard(p) for p in node.patterns)
-
-                # default: not a wildcard
-                return False
-
             if isinstance(node, ast.Match):
                 found = False
                 new_last = None
@@ -700,100 +865,6 @@ class StdGenerator(AstGenerator):
                 node.value is v for v in (None, True, False)
             ):
                 return ast.MatchValue(value=ast.Constant(value=node.value))
-
-            # @lambda f:lambda pattern:set(f(pattern))
-            def all_names(node):
-                if isinstance(node, ast.MatchAs) and node.name:
-                    yield node.name
-                elif isinstance(node, ast.MatchStar) and node.name:
-                    yield node.name
-                elif isinstance(node, ast.MatchMapping) and node.rest:
-                    yield node.rest
-                elif isinstance(node, ast.MatchOr):
-                    yield from set.intersection(
-                        *[set(all_names(pattern)) for pattern in node.patterns]
-                    )
-                else:
-                    for child in ast.iter_child_nodes(node):
-                        yield from all_names(child)
-
-            class RemoveName(ast.NodeVisitor):
-                def __init__(self, condition: Callable[[str | None], bool]) -> None:
-                    self.condition = condition
-
-                def visit_MatchAs(self, node: ast.MatchAs) -> None:
-                    if self.condition(node.name):
-                        node.name = None
-
-                def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
-                    if self.condition(node.rest):
-                        node.rest = None
-
-            class RemoveNameCleanup(ast.NodeTransformer):
-                def visit_MatchAs(
-                    self, node: ast.MatchAs
-                ) -> ast.AST | list[ast.AST] | None:
-                    if node.name is None and node.pattern is not None:
-                        return self.visit(node.pattern)
-                    return self.generic_visit(node)
-
-            class FixPatternNames(ast.NodeTransformer):
-                def __init__(
-                    self, used: set[str] | None = None, allowed: set[str] | None = None
-                ) -> None:
-                    # variables which are already used
-                    self.used: set[str] = set() if used is None else set(used)
-                    # variables which are allowed in a MatchOr
-                    self.allowed: set[str] | None = allowed
-
-                def is_allowed(self, name: str | None) -> bool:
-                    return (
-                        name is None
-                        or name not in self.used
-                        and (name in self.allowed if self.allowed is not None else True)
-                    )
-
-                def visit_MatchAs(
-                    self, node: ast.MatchAs
-                ) -> ast.AST | list[ast.AST] | None:
-                    if not self.is_allowed(node.name):
-                        return ast.MatchSingleton(value=None)
-                    elif node.name is not None:
-                        self.used.add(node.name)
-                    return self.generic_visit(node)
-
-                def visit_MatchStar(
-                    self, node: ast.MatchStar
-                ) -> ast.AST | list[ast.AST] | None:
-                    if not self.is_allowed(node.name):
-                        return ast.MatchSingleton(value=None)
-                    elif node.name is not None:
-                        self.used.add(node.name)
-                    return self.generic_visit(node)
-
-                def visit_MatchMapping(
-                    self, node: ast.MatchMapping
-                ) -> ast.AST | list[ast.AST] | None:
-                    if not self.is_allowed(node.rest):
-                        return ast.MatchSingleton(value=None)
-                    elif node.rest is not None:
-                        self.used.add(node.rest)
-                    return self.generic_visit(node)
-
-                def visit_MatchOr(self, node: ast.MatchOr) -> ast.MatchOr:
-                    allowed = set.intersection(
-                        *[set(all_names(pattern)) for pattern in node.patterns]
-                    )
-                    allowed -= self.used
-
-                    node.patterns = [
-                        FixPatternNames(set(self.used), allowed).visit(child)  # type: ignore[arg-type]
-                        for child in node.patterns
-                    ]
-
-                    self.used |= allowed
-
-                    return node
 
             if isinstance(node, ast.match_case):
                 node.pattern = FixPatternNames().visit(node.pattern)

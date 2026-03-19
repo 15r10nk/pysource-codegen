@@ -20,12 +20,101 @@ class Invalid(Exception):
     pass
 
 
-@dataclass
 class Context:
-    in_async_code: bool = False
-    in_async_context: bool = False
-    in_loop: bool = False
-    in_excepthandler: bool = False
+    """Mutable scope-tracking context threaded through the generator.
+
+    Uses __slots__ for fast attribute access and a copy() method for
+    branching at each tree node (context_before copies once, then mutates).
+    """
+
+    __slots__ = (
+        "in_async_code",
+        "in_async_context",
+        "in_loop",
+        "in_excepthandler",
+        # True inside FunctionDef/AsyncFunctionDef/Lambda body (reset at ClassDef body)
+        "in_function",
+        # True inside any function/lambda/class body
+        "in_function_or_class",
+        # True inside Try.finalbody / TryStar.finalbody (reset at function boundary)
+        "in_finally",
+        # True inside TryStar.handlers (reset at function boundary)
+        "in_trystar_handler",
+        # True inside a MatchValue node
+        "in_match_value",
+        # True inside MatchValue.value AND also inside Attribute.value
+        "in_match_value_attr_chain",
+        # True inside MatchValue AND inside a UnaryOp
+        "in_match_value_unaryop",
+        # True inside MatchClass.cls
+        "in_match_class_cls",
+        # True inside any comprehension node (GeneratorExp/ListComp/SetComp/DictComp)
+        "in_comprehension",
+        # True inside ClassDef.body but NOT inside a nested function/lambda
+        "in_class_not_function",
+        # True inside annotation/type-alias scope (returns, annotations, TypeAlias.value, etc.)
+        "in_annotation_scope",
+        # True inside AnnAssign.annotation
+        "in_ann_assign_annotation",
+        # True inside TypeAlias.value when also inside ClassDef.body
+        "in_type_alias_in_class",
+        # True inside AnnAssign.target
+        "in_ann_assign_target",
+        # True inside Delete.targets but not behind Subscript.value/slice or Attribute.value
+        "in_delete_target",
+        # True inside TypeAlias.value or TypeVar.bound (type parameter scope)
+        "in_type_scope",
+        # True inside arg.annotation / FunctionDef.returns / AsyncFunctionDef.returns
+        "in_annotation_return_scope",
+    )
+
+    def __init__(self) -> None:
+        self.in_async_code = False
+        self.in_async_context = False
+        self.in_loop = False
+        self.in_excepthandler = False
+        self.in_function = False
+        self.in_function_or_class = False
+        self.in_finally = False
+        self.in_trystar_handler = False
+        self.in_match_value = False
+        self.in_match_value_attr_chain = False
+        self.in_match_value_unaryop = False
+        self.in_match_class_cls = False
+        self.in_comprehension = False
+        self.in_class_not_function = False
+        self.in_annotation_scope = False
+        self.in_ann_assign_annotation = False
+        self.in_type_alias_in_class = False
+        self.in_ann_assign_target = False
+        self.in_delete_target = False
+        self.in_type_scope = False
+        self.in_annotation_return_scope = False
+
+    def copy(self) -> Context:
+        new = Context.__new__(Context)
+        new.in_async_code = self.in_async_code
+        new.in_async_context = self.in_async_context
+        new.in_loop = self.in_loop
+        new.in_excepthandler = self.in_excepthandler
+        new.in_function = self.in_function
+        new.in_function_or_class = self.in_function_or_class
+        new.in_finally = self.in_finally
+        new.in_trystar_handler = self.in_trystar_handler
+        new.in_match_value = self.in_match_value
+        new.in_match_value_attr_chain = self.in_match_value_attr_chain
+        new.in_match_value_unaryop = self.in_match_value_unaryop
+        new.in_match_class_cls = self.in_match_class_cls
+        new.in_comprehension = self.in_comprehension
+        new.in_class_not_function = self.in_class_not_function
+        new.in_annotation_scope = self.in_annotation_scope
+        new.in_ann_assign_annotation = self.in_ann_assign_annotation
+        new.in_type_alias_in_class = self.in_type_alias_in_class
+        new.in_ann_assign_target = self.in_ann_assign_target
+        new.in_delete_target = self.in_delete_target
+        new.in_type_scope = self.in_type_scope
+        new.in_annotation_return_scope = self.in_annotation_return_scope
+        return new
 
 
 @dataclass
