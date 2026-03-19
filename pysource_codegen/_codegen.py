@@ -25,7 +25,7 @@ def is_valid_ast(
     tree: ast.AST, print: Callable[..., None] = lambda *args: None
 ) -> bool:
 
-    return AstChecker().check(tree)
+    return AstChecker().check(tree, print)
 
 
 def check(tree: ast.AST) -> None:

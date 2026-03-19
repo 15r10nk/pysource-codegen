@@ -65,7 +65,7 @@ class AstChecker(StdGenerator):
         return child_parent_node.relocate(self.target).node is None
 
     def generate_BuiltinNodeType(
-        self, place, parent_node, info, ast_type_name, depth, stop
+        self, place, parent_node, info, ast_type_name, depth, stop, context
     ):
         target_node = parent_node.relocate(self.target)
         place(target_node.node)

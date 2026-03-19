@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import itertools
 import sys
+from dataclasses import replace
 from typing import Callable
 from typing import Iterable
 from typing import Sequence
@@ -15,6 +16,7 @@ from ._utils import unique_by
 from ._utils import walk_childs_first
 from ._utils import walk_function_nodes
 from pysource_codegen._generator import AstGenerator
+from pysource_codegen._generator import Context
 from pysource_codegen._generator import Invalid
 from pysource_codegen._generator import NodeRef
 
@@ -406,7 +408,29 @@ class StdGenerator(AstGenerator):
 
         return 1
 
-    def fix(self, node: ast.AST, parent_node: NodeRef) -> ast.AST:
+    def context_before(
+        self, context: Context, node: NodeRef, attr: str, index: int | None
+    ) -> Context:
+        node_type = type(node.node).__name__
+        # Mirrors the in_async_code loop in fix() exactly.
+        if node_type == "AsyncFunctionDef" and attr == "body":
+            return replace(context, in_async_code=True)
+        # Any attribute of these node types resets async context
+        if node_type in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
+            return replace(context, in_async_code=False)
+        # Specific (node_type, attr) pairs that break the async scope
+        if (node_type, attr) in (
+            ("arg", "annotation"),
+            ("AsyncFunctionDef", "returns"),
+            ("TypeVar", "bound"),
+        ):
+            return replace(context, in_async_code=False)
+        # On Python < 3.11, comprehensions break the async scope
+        if not py311plus and node_type in comprehensions:
+            return replace(context, in_async_code=False)
+        return context
+
+    def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
 
         parents = parent_node.all_parents()
 
@@ -828,6 +852,8 @@ class StdGenerator(AstGenerator):
 
             if not py311plus and parent in comprehensions:
                 break
+
+        assert in_async_code == context.in_async_code
 
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
             if self.use() and not in_async_code:

@@ -20,8 +20,9 @@ class Invalid(Exception):
     pass
 
 
+@dataclass
 class Context:
-    pass
+    in_async_code: bool = False
 
 
 @dataclass
@@ -141,7 +142,7 @@ class AstGenerator:
     def none_allowed(self, parent: NodeRef) -> bool:
         return True
 
-    def fix(self, node: ast.AST, parent: NodeRef) -> ast.AST:
+    def fix(self, node: ast.AST, parent: NodeRef, context: Context) -> ast.AST:
         return node
 
     def use(self) -> bool:
@@ -154,15 +155,18 @@ class AstGenerator:
             return 0
 
     def context_before(
-        self, context: Context | None, node: NodeRef, attr: str, index: int | None
-    ) -> Context | None:
-        pass
+        self, context: Context, node: NodeRef, attr: str, index: int | None
+    ) -> Context:
+        return context
 
-    def context_after(self, context: Context | None, node: NodeRef) -> Context | None:
+    def context_after(
+        self, context: Context, node: NodeRef, attr: str, index: int | None
+    ) -> None:
         pass
 
     def generate(self, ast_type_name: str, depth: int = 0) -> ast.AST:
         result = None
+        context = Context()
 
         def place(node):
             nonlocal result
@@ -171,11 +175,11 @@ class AstGenerator:
 
         parent_node = NodeRef(None, "", None, None)
 
-        self.generate_impl(place, parent_node, ast_type_name, depth)
+        self.generate_impl(place, parent_node, ast_type_name, depth, context)
 
         assert result is not None
 
-        self.fix(result, parent_node)
+        self.fix(result, parent_node, context)
         result = self.fix_result(result)
         return result
 
@@ -228,6 +232,7 @@ class AstGenerator:
         ast_type_name: str,
         depth: int,
         stop: bool,
+        context: Context,
     ) -> None:
         new_result = info.ast_type()
         new_node = place(new_result)
@@ -235,6 +240,8 @@ class AstGenerator:
         attr_length = self.attr_length_provider(new_node)
 
         for attr_name, (node_type, quantity) in info.fields.items():
+            child_context = self.context_before(context, new_node, attr_name, None)
+
             if "*" in quantity:
                 setattr(new_result, attr_name, [])
 
@@ -258,7 +265,9 @@ class AstGenerator:
                 if self._should_place_none(child_parent_node, quantity, new_node):
                     child_place(None)
                 else:
-                    self.generate_impl(child_place, child_parent_node, node_type, depth)
+                    self.generate_impl(
+                        child_place, child_parent_node, node_type, depth, child_context
+                    )
 
             if "*" in quantity:
                 for _ in range(attr_length(attr_name, stop)):
@@ -272,7 +281,7 @@ class AstGenerator:
                     new_result,
                     attr_name,
                     [
-                        self.fix(v, new_node.new_child(v, attr_name, i))
+                        self.fix(v, new_node.new_child(v, attr_name, i), child_context)
                         for i, v in enumerate(value)
                     ],
                 )
@@ -280,8 +289,12 @@ class AstGenerator:
                 setattr(
                     new_result,
                     attr_name,
-                    self.fix(value, new_node.new_child(value, attr_name)),
+                    self.fix(
+                        value, new_node.new_child(value, attr_name), child_context
+                    ),
                 )
+
+            self.context_after(child_context, new_node, attr_name, None)
 
     def generate_UnionNodeType(
         self,
@@ -291,6 +304,7 @@ class AstGenerator:
         ast_type_name: str,
         depth: int,
         stop: bool,
+        context: Context,
     ) -> None:
 
         options_list = [
@@ -305,7 +319,7 @@ class AstGenerator:
         assert len(invalid_option) in (0, 1), invalid_option
 
         if len(invalid_option) == 1:
-            self.generate_impl(place, parent_node, invalid_option[0], depth)
+            self.generate_impl(place, parent_node, invalid_option[0], depth, context)
             return
 
         options = dict(options_list)
@@ -331,6 +345,7 @@ class AstGenerator:
             parent_node,
             chosen,
             depth,
+            context,
         )
 
     def generate_BuiltinNodeType(
@@ -341,6 +356,7 @@ class AstGenerator:
         ast_type_name: str,
         depth: int,
         stop: bool,
+        context: Context,
     ) -> None:
 
         result: str | int | float | bytes | bool | None
@@ -383,6 +399,7 @@ class AstGenerator:
         parent_node: NodeRef,
         ast_type_name: str,
         depth: int = 0,
+        context: Context = Context(),
     ) -> None:
         depth += 1
         self.nodes += 1
@@ -395,5 +412,5 @@ class AstGenerator:
         info = get_info(ast_type_name)
 
         getattr(self, f"generate_{type(info).__name__}")(
-            place, parent_node, info, ast_type_name, depth, stop
+            place, parent_node, info, ast_type_name, depth, stop, context
         )
