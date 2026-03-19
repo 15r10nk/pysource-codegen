@@ -55,10 +55,6 @@ repos:
     args: [--autofix, --indent, '2']
 
 - hooks:
-  - id: blackdoc
-  repo: https://github.com/keewis/blackdoc
-  rev: v0.4.5
-- hooks:
   - id: commitizen
     stages:
     - commit-msg

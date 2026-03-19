@@ -24,9 +24,9 @@ class TestInvalidAst(TestBase):
         self.details = []
         super().setUp()
 
-    def addDetail(self, text):
+    def addDetail(self, *text):
         if hasattr(self, "details"):
-            self.details.append(text)
+            self.details.append(" ".join(map(str, text)))
 
     def does_compile(self, tree: ast.Module):
         for node in ast.walk(tree):
@@ -72,7 +72,7 @@ def gen_test(name, file):
                 return  # pytest.skip(f"ast.Constant can not be unparsed on python3.7")
 
         self.assertEqual(
-            is_valid_ast(tree),
+            is_valid_ast(tree, self.addDetail),
             self.does_compile(tree),
             msg=self.message(),
         )

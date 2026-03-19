@@ -27,7 +27,13 @@ else:
     from astunparse import unparse  # type: ignore
 
 
-def ast_dump(node: ast.AST) -> str:
+def ast_dump(node: ast.AST | list[ast.AST]) -> str:
+    if isinstance(node, list):
+        return "[" + ",\n".join(f"{i}: {ast_dump(e)}" for i, e in enumerate(node)) + "]"
+
+    if not isinstance(node, ast.AST):
+        return repr(node)
+
     if sys.version_info >= (3, 9):
         return ast.dump(node, indent=2)
     return ast.dump(node)
@@ -102,14 +108,19 @@ def equal_ast(
     t: str = "root",
 ) -> bool:
 
+    def dbg():
+        print(ast_dump(lhs))
+        print("!=")
+        print(ast_dump(rhs))
+
     if type(lhs) is not type(rhs):
-        print(t, lhs, "!=", rhs)
+        dbg()
         return False
 
     elif isinstance(lhs, list):
         assert isinstance(rhs, list)
         if len(lhs) != len(rhs):
-            print(t, lhs, "!=", rhs)
+            dbg()
             return False
 
         return all(
@@ -124,7 +135,7 @@ def equal_ast(
         )
     else:
         if lhs != rhs:
-            print(t, lhs, "!=", rhs)
+            dbg()
         return lhs == rhs
 
 

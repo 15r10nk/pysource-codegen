@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pysource_codegen._checker import AstChecker
+
 __all__ = [
     "StdGenerator",
     "ast_dump",
@@ -22,8 +24,14 @@ from ._utils import unparse
 def is_valid_ast(
     tree: ast.AST, print: Callable[..., None] = lambda *args: None
 ) -> bool:
-    generator = StdGenerator()
-    return generator.is_valid_ast(tree, print)
+
+    old_result = StdGenerator().is_valid_ast(tree, print)
+
+    new_result = AstChecker().check(tree)
+    if old_result != new_result:
+        AstChecker().check(tree, print)
+
+    return new_result
 
 
 def check(tree: ast.AST) -> None:

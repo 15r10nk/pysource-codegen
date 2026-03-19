@@ -50,9 +50,11 @@ class StdGenerator(AstGenerator):
         return True
 
     def probability_try(
-        self, parent: NodeRef, parents: Sequence[tuple[str, str]], child_name: str
+        self, node: NodeRef, parents: Sequence[tuple[str, str]], child_name: str
     ) -> float:
         parent_types = [p[0] for p in parents]
+
+        assert node.all_parents() == parents, (node.all_parents(), parents)
 
         def inside(
             types: str | tuple[str, ...], not_types: tuple[str, ...] = ()

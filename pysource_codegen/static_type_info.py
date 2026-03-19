@@ -251,7 +251,9 @@ type_infos = {
         fields={"value": ("expr", "")},
         ast_type=ast.Index,
     ),
-    "_deleteTargets": UnionNodeType(options=["Name", "Attribute", "Subscript"]),
+    "_deleteTargets": UnionNodeType(
+        options=["Name", "Attribute", "Subscript", "List", "Tuple"]
+    ),
     "Module": NodeType(
         fields={"body": ("stmt", "*"), "type_ignores": ("type_ignore", "*")},
         ast_type=ast.Module,

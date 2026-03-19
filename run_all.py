@@ -106,7 +106,6 @@ def run_test(version):
 
 
 results = {}
-fail_commands = []
 
 with concurrent.futures.ThreadPoolExecutor() as executor:
     futures = {executor.submit(run_test, version): version for version in versions}
@@ -153,3 +152,5 @@ for i in range(max_rows):
 
 console = Console()
 console.print(table)
+
+exit(1 if any(v != 0 for v in results.values()) else 0)

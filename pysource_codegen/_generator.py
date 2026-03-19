@@ -60,8 +60,40 @@ class NodeRef:
     def unknown_attr(self, attr, index=None):
         return NodeRef(self, attr, index, None)
 
-    def new_child(self, value, attr_name, index=None):
+    def new_child(self, value, attr_name, index=None) -> NodeRef:
         return NodeRef(self, attr_name, index, value)
+
+    def relocate(self, tree) -> NodeRef:
+        if self.parent is None:
+            return NodeRef(node=tree)
+
+        parent = self.parent.relocate(tree)
+        child_node = getattr(parent.node, self.parent_attr)
+        if self.parent_attr_index is not None:
+            child_node = child_node[self.parent_attr_index]
+
+        return parent.new_child(child_node, self.parent_attr, self.parent_attr_index)
+
+    def depth(self):
+        if self.parent is None:
+            return 0
+        else:
+            return self.parent.depth() + 1
+
+    def __repr__(self):
+        return self._path() + f": {type(self.node).__name__}"
+
+    def _path(self):
+        result = ""
+        if self.parent is None:
+            result = "root"
+        else:
+            result = repr(self.parent)
+        if self.parent_attr:
+            result += f".{self.parent_attr}"
+        if self.parent_attr_index:
+            result += f"[{self.parent_attr_index}]"
+        return result
 
 
 def parents_of(node: NodeRef | None) -> list[tuple[str, str]]:
@@ -77,10 +109,14 @@ class AstGenerator:
         node_limit: int = 10000000,
         depth_limit: int = 8,
     ) -> None:
-        self.rand = random.Random(seed)
+        self._rand = random.Random(seed)
         self.nodes = 0
         self.node_limit = node_limit
         self.depth_limit = depth_limit
+
+    @property
+    def rand(self):
+        return self._rand
 
     def cnd(self) -> bool:
         return self.rand.choice([True, False])
@@ -122,10 +158,10 @@ class AstGenerator:
         return True
 
     def probability(
-        self, parent: NodeRef, parents: list[tuple[str, str]], child_name: str
+        self, node: NodeRef, parents: list[tuple[str, str]], child_name: str
     ) -> float:
         try:
-            return self.probability_try(parent, parents, child_name)
+            return self.probability_try(node, parents, child_name)
         except Invalid:
             return 0
 
@@ -140,20 +176,21 @@ class AstGenerator:
     def is_valid_ast(
         self, tree: ast.AST, print: Callable[..., None] = lambda *args: None
     ) -> bool:
-        parent_node = NodeRef(None, "", None, tree)
 
-        def is_valid(node: ast.AST, parents: list[tuple[str, str]]) -> bool:
+        def is_valid(
+            node: ast.AST, node_ref: NodeRef, parents: list[tuple[str, str]]
+        ) -> bool:
             type_name = node.__class__.__name__
             if (
                 isinstance(node, ast.AST)
                 and parents
-                and self.probability(parent_node, parents, type_name) == 0
+                and self.probability(node_ref, parents, type_name) == 0
             ):
                 print("invalid node with:")
                 print("parents:", parents)
                 print("node:", node)
                 try:
-                    self.probability_try(parent_node, parents, node.__class__.__name__)
+                    self.probability_try(node_ref, parents, node.__class__.__name__)
                 except Invalid:
                     frame = traceback.extract_tb(sys.exc_info()[2])[1]
                     print("file:", f"{frame.filename}:{frame.lineno}")
@@ -193,7 +230,7 @@ class AstGenerator:
                             (
                                 info.fields[attr_name][1] == "?"
                                 and self.none_allowed(
-                                    parent_node, parents + [(type_name, attr_name)]
+                                    node_ref, parents + [(type_name, attr_name)]
                                 )
                             )
                             or info.fields[attr_name][0] == "constant"
@@ -205,18 +242,31 @@ class AstGenerator:
                     value = getattr(node, field)
                     if isinstance(value, list):
                         if not all(
-                            is_valid(e, parents + [(type_name, field)]) for e in value
+                            is_valid(
+                                e,
+                                node_ref.new_child(e, field, i),
+                                parents + [(type_name, field)],
+                            )
+                            for i, e in enumerate(value)
                         ):
                             return False
                     else:
-                        if not is_valid(value, parents + [(type_name, field)]):
+                        if not is_valid(
+                            value,
+                            node_ref.new_child(value, field),
+                            parents + [(type_name, field)],
+                        ):
                             return False
             return True
 
-        if not is_valid(tree, []):
+        if not is_valid(tree, NodeRef(None, "", None, tree), []):
             return False
 
         def fix_tree(node: ast.AST, parent_node: NodeRef, parents):
+            assert parents_of(parent_node) == parents, (
+                parents_of(parent_node),
+                parents,
+            )
             for field in node._fields:
                 value = getattr(node, field)
                 if isinstance(value, ast.AST):
@@ -296,6 +346,50 @@ class AstGenerator:
         result = self.fix_result(result)
         return result
 
+    def attr_length_provider(self, parent_node: NodeRef):
+        ast_type_name = type(parent_node.node).__name__
+        ranges = {}
+        depth = parent_node.depth()
+
+        def attr_length(attr_name, stop):
+            if ast_type_name == "Module":
+                return 20
+
+            same_length = self.same_length()
+
+            if ast_type_name in same_length:
+                attrs = same_length[ast_type_name]
+                if attr_name in attrs[1:]:
+                    return attr_length(attrs[0], stop)
+
+            if ast_type_name == "arguments" and attr_name == "defaults":
+                # defaults of function arguments map to args and posonlyargs (but not all have default args)
+                min = 0
+                max = attr_length("posonlyargs", stop) + attr_length("args", stop)
+                ranges[attr_name] = self.rand.randint(min, max)
+
+            elif attr_name not in ranges:
+                min = self.min_attr_length(ast_type_name, attr_name)
+
+                max = min if stop else min + 1 if depth > 10 else min + 5
+                ranges[attr_name] = self.rand.randint(min, max)
+                return ranges[attr_name]
+
+            return ranges[attr_name]
+
+        return attr_length
+
+    def _should_place_none(
+        self,
+        child_parent_node: NodeRef,
+        quantity: str,
+        new_node: NodeRef,
+        new_parents: list,
+    ) -> bool:
+        return (
+            "?" in quantity and self.none_allowed(new_node, new_parents) and self.cnd()
+        )
+
     def generate_NodeType(
         self,
         place: Callable[[GeneratedValue], NodeRef],
@@ -306,42 +400,17 @@ class AstGenerator:
         depth: int,
         stop: bool,
     ) -> None:
-        ranges = {}
         new_result = info.ast_type()
         new_node = place(new_result)
-        assert parents_of(new_node) == parents, (parents_of(parent_node), parents)
+        assert parents_of(new_node) == parents, (parents_of(new_node), parents)
 
-        def attr_length(child, attr_name):
-            if ast_type_name == "Module":
-                return 20
-
-            same_length = self.same_length()
-
-            if ast_type_name in same_length:
-                attrs = same_length[ast_type_name]
-                if attr_name in attrs[1:]:
-                    return attr_length(child, attrs[0])
-
-            if child == "arguments" and attr_name == "defaults":
-                # defaults of function arguments map to args and posonlyargs (but not all have default args)
-                min = 0
-                max = attr_length(child, "posonlyargs") + attr_length(child, "args")
-                ranges[attr_name] = self.rand.randint(min, max)
-
-            elif attr_name not in ranges:
-                min = self.min_attr_length(child, attr_name)
-
-                max = min if stop else min + 1 if depth > 10 else min + 5
-                ranges[attr_name] = self.rand.randint(min, max)
-
-            return ranges[attr_name]
+        attr_length = self.attr_length_provider(new_node)
 
         for attr_name, (node_type, quantity) in info.fields.items():
             if "*" in quantity:
                 setattr(new_result, attr_name, [])
 
                 def child_place(node):
-
                     lst = getattr(new_result, attr_name)
                     lst.append(node)
                     return NodeRef(new_node, attr_name, len(lst) - 1, node)
@@ -355,19 +424,22 @@ class AstGenerator:
             new_parents = [*parents, (ast_type_name, attr_name)]
 
             def gen():
-                if (
-                    "?" in quantity
-                    and self.none_allowed(new_node, new_parents)
-                    and self.cnd()
+                if "*" in quantity:
+                    current_idx = len(getattr(new_result, attr_name))
+                    child_parent_node = new_node.unknown_attr(attr_name, current_idx)
+                else:
+                    child_parent_node = new_node.unknown_attr(attr_name)
+                if self._should_place_none(
+                    child_parent_node, quantity, new_node, new_parents
                 ):
                     child_place(None)
                 else:
                     self.generate_impl(
-                        child_place, new_node, node_type, new_parents, depth
+                        child_place, child_parent_node, node_type, new_parents, depth
                     )
 
             if "*" in quantity:
-                for _ in range(attr_length(ast_type_name, attr_name)):
+                for _ in range(attr_length(attr_name, stop)):
                     gen()
             else:
                 gen()
@@ -399,9 +471,11 @@ class AstGenerator:
         depth: int,
         stop: bool,
     ) -> None:
-        assert parents[:-1] == parent_node.all_parents(), (
+        assert parents == parent_node.all_parents(), (
             parents,
             parents_of(parent_node),
+            parent_node,
+            parent_node.all_parents(),
         )
 
         options_list = [
@@ -431,10 +505,17 @@ class AstGenerator:
             # TODO: better handling of `type?`
             return None
 
+        non_zero = [opt for opt, p in options.items() if p != 0]
+        chosen = (
+            non_zero[0]
+            if len(non_zero) == 1
+            else self.rand.choices(*zip(*options.items()))[0]
+        )
+
         self.generate_impl(
             place,
             parent_node,
-            self.rand.choices(*zip(*options.items()))[0],
+            chosen,
             parents,
             depth,
         )
