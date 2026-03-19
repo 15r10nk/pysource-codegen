@@ -23,8 +23,8 @@ class AstChecker(StdGenerator):
     def rand(self):
         assert False
 
-    def probability(self, parent_node, type_name) -> float:
-        original = super().probability(parent_node, type_name)
+    def probability(self, parent_node, type_name, context) -> float:
+        original = super().probability(parent_node, type_name, context)
 
         target_parent = parent_node.relocate(self.target)
 

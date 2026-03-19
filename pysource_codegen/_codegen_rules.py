@@ -51,7 +51,9 @@ class StdGenerator(AstGenerator):
         """
         return True
 
-    def probability_try(self, node: NodeRef, child_name: str) -> float:
+    def probability_try(
+        self, node: NodeRef, child_name: str, context: Context
+    ) -> float:
         parents = node.all_parents()
         parent_types = [p[0] for p in parents]
 
@@ -223,6 +225,7 @@ class StdGenerator(AstGenerator):
             ("AsyncFunctionDef.body", "GeneratorExp.elt"),
             ("FunctionDef.body", "Lambda.body", "ClassDef.body"),
         )
+        assert in_async_code == context.in_async_code
 
         if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
             raise Invalid
@@ -239,6 +242,7 @@ class StdGenerator(AstGenerator):
                 "ClassDef.body",
             ),
         )
+        assert in_loop == context.in_loop
 
         if child_name in ("Break", "Continue") and not in_loop:
             raise Invalid
@@ -412,22 +416,57 @@ class StdGenerator(AstGenerator):
         self, context: Context, node: NodeRef, attr: str, index: int | None
     ) -> Context:
         node_type = type(node.node).__name__
-        # Mirrors the in_async_code loop in fix() exactly.
+
+        # --- in_async_code: mirrors inside() in probability_try ---
+        # AsyncFunctionDef.body and GeneratorExp.elt activate async context
+        if (node_type, attr) in (("AsyncFunctionDef", "body"), ("GeneratorExp", "elt")):
+            context = replace(context, in_async_code=True)
+        # FunctionDef.body, Lambda.body, ClassDef.body reset it
+        elif (node_type, attr) in (
+            ("FunctionDef", "body"),
+            ("Lambda", "body"),
+            ("ClassDef", "body"),
+        ):
+            context = replace(context, in_async_code=False)
+
+        # --- in_async_context: mirrors fix()'s in_async_code loop (stricter) ---
+        # Only AsyncFunctionDef.body activates; annotations/type-params/nested fns reset
         if node_type == "AsyncFunctionDef" and attr == "body":
-            return replace(context, in_async_code=True)
-        # Any attribute of these node types resets async context
-        if node_type in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
-            return replace(context, in_async_code=False)
-        # Specific (node_type, attr) pairs that break the async scope
-        if (node_type, attr) in (
-            ("arg", "annotation"),
+            context = replace(context, in_async_context=True)
+        elif node_type in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
+            context = replace(context, in_async_context=False)
+        elif (node_type, attr) in (
             ("AsyncFunctionDef", "returns"),
+            ("arg", "annotation"),
             ("TypeVar", "bound"),
         ):
-            return replace(context, in_async_code=False)
-        # On Python < 3.11, comprehensions break the async scope
-        if not py311plus and node_type in comprehensions:
-            return replace(context, in_async_code=False)
+            context = replace(context, in_async_context=False)
+        elif not py311plus and node_type in comprehensions:
+            context = replace(context, in_async_context=False)
+
+        # --- in_loop: mirrors the inside() call in probability_try ---
+        # Entering a loop body enables in_loop
+        if (node_type, attr) in (
+            ("For", "body"),
+            ("While", "body"),
+            ("AsyncFor", "body"),
+        ):
+            context = replace(context, in_loop=True)
+        # Entering a function/class body resets in_loop
+        elif (node_type, attr) in (
+            ("FunctionDef", "body"),
+            ("Lambda", "body"),
+            ("AsyncFunctionDef", "body"),
+            ("ClassDef", "body"),
+        ):
+            context = replace(context, in_loop=False)
+
+        # --- in_excepthandler: mirrors the loop in fix() ---
+        if node_type == "ExceptHandler":
+            context = replace(context, in_excepthandler=True)
+        elif node_type in ("FunctionDef", "Lambda", "AsyncFunctionDef"):
+            context = replace(context, in_excepthandler=False)
+
         return context
 
     def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
@@ -842,18 +881,32 @@ class StdGenerator(AstGenerator):
                 break
             if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
                 break
-
             if (parent, attr) in (
                 ("arg", "annotation"),
                 ("AsyncFunctionDef", "returns"),
                 ("TypeVar", "bound"),
             ):
                 break
-
             if not py311plus and parent in comprehensions:
                 break
 
-        assert in_async_code == context.in_async_code
+        assert in_async_code == context.in_async_context
+
+        in_loop = False
+        for parent, attr in reversed(parents):
+            qual_parent = f"{parent}.{attr}"
+            if qual_parent in ("For.body", "While.body", "AsyncFor.body"):
+                in_loop = True
+                break
+            if qual_parent in (
+                "FunctionDef.body",
+                "Lambda.body",
+                "AsyncFunctionDef.body",
+                "ClassDef.body",
+            ):
+                break
+
+        assert in_loop == context.in_loop
 
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
             if self.use() and not in_async_code:
@@ -867,6 +920,8 @@ class StdGenerator(AstGenerator):
                 break
             if parent in ("FunctionDef", "Lambda", "AsyncFunctionDef"):
                 break
+
+        assert in_excepthandler == context.in_excepthandler
 
         if isinstance(node, ast.Raise):
             if self.use() and not node.exc:

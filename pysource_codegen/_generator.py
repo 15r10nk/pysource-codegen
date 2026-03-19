@@ -23,6 +23,9 @@ class Invalid(Exception):
 @dataclass
 class Context:
     in_async_code: bool = False
+    in_async_context: bool = False
+    in_loop: bool = False
+    in_excepthandler: bool = False
 
 
 @dataclass
@@ -125,7 +128,9 @@ class AstGenerator:
         raise NotImplementedError
 
     # --- helper stubs so static type checkers know these exist ---
-    def probability_try(self, parent: NodeRef, child_name: str) -> float:
+    def probability_try(
+        self, parent: NodeRef, child_name: str, context: Context
+    ) -> float:
         """Return probability for child_name given parents or raise Invalid.
 
         Real implementations live elsewhere; default raises Invalid to signal
@@ -148,9 +153,9 @@ class AstGenerator:
     def use(self) -> bool:
         return True
 
-    def probability(self, node: NodeRef, child_name: str) -> float:
+    def probability(self, node: NodeRef, child_name: str, context: Context) -> float:
         try:
-            return self.probability_try(node, child_name)
+            return self.probability_try(node, child_name, context)
         except Invalid:
             return 0
 
@@ -308,7 +313,8 @@ class AstGenerator:
     ) -> None:
 
         options_list = [
-            (option, self.probability(parent_node, option)) for option in info.options
+            (option, self.probability(parent_node, option, context))
+            for option in info.options
         ]
 
         # check if an invalid can actually be valid (test_valid_source.py)
