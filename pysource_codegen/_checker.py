@@ -23,8 +23,8 @@ class AstChecker(StdGenerator):
     def rand(self):
         assert False
 
-    def probability(self, parent_node, parents, type_name) -> float:
-        original = super().probability(parent_node, parents, type_name)
+    def probability(self, parent_node, type_name) -> float:
+        original = super().probability(parent_node, type_name)
 
         target_parent = parent_node.relocate(self.target)
 
@@ -59,13 +59,13 @@ class AstChecker(StdGenerator):
 
         return attr_length
 
-    def _should_place_none(self, child_parent_node, quantity, new_node, new_parents):
+    def _should_place_none(self, child_parent_node, quantity, new_node):
         if "?" not in quantity:
             return False
         return child_parent_node.relocate(self.target).node is None
 
     def generate_BuiltinNodeType(
-        self, place, parent_node, info, ast_type_name, parents, depth, stop
+        self, place, parent_node, info, ast_type_name, depth, stop
     ):
         target_node = parent_node.relocate(self.target)
         place(target_node.node)

@@ -25,13 +25,7 @@ def is_valid_ast(
     tree: ast.AST, print: Callable[..., None] = lambda *args: None
 ) -> bool:
 
-    old_result = StdGenerator().is_valid_ast(tree, print)
-
-    new_result = AstChecker().check(tree)
-    if old_result != new_result:
-        AstChecker().check(tree, print)
-
-    return new_result
+    return AstChecker().check(tree)
 
 
 def check(tree: ast.AST) -> None:

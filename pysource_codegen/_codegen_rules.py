@@ -49,12 +49,9 @@ class StdGenerator(AstGenerator):
         """
         return True
 
-    def probability_try(
-        self, node: NodeRef, parents: Sequence[tuple[str, str]], child_name: str
-    ) -> float:
+    def probability_try(self, node: NodeRef, child_name: str) -> float:
+        parents = node.all_parents()
         parent_types = [p[0] for p in parents]
-
-        assert node.all_parents() == parents, (node.all_parents(), parents)
 
         def inside(
             types: str | tuple[str, ...], not_types: tuple[str, ...] = ()
@@ -409,14 +406,9 @@ class StdGenerator(AstGenerator):
 
         return 1
 
-    def fix(
-        self, node: ast.AST, parent_node: NodeRef, parents: list[tuple[str, str]]
-    ) -> ast.AST:
+    def fix(self, node: ast.AST, parent_node: NodeRef) -> ast.AST:
 
-        assert parent_node.all_parents() == parents, (
-            parent_node.all_parents(),
-            parents,
-        )
+        parents = parent_node.all_parents()
 
         if isinstance(node, ast.ImportFrom):
             if self.use() and not py310plus and node.level is None:
@@ -1373,7 +1365,8 @@ class StdGenerator(AstGenerator):
 
         return 0
 
-    def none_allowed(self, parent: NodeRef, parents: Sequence[tuple[str, str]]) -> bool:
+    def none_allowed(self, parent: NodeRef) -> bool:
+        parents = parent.all_parents()
         if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
             return False
         return True
