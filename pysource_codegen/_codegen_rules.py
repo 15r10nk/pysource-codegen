@@ -405,13 +405,21 @@ class StdGenerator(AstGenerator):
 
         # --- in_async_code: mirrors inside() in probability_try ---
         # AsyncFunctionDef.body and GeneratorExp.elt activate async context
-        if (node_type, attr) in (("AsyncFunctionDef", "body"), ("GeneratorExp", "elt")):
+        if not context.in_async_code and (node_type, attr) in (
+            ("AsyncFunctionDef", "body"),
+            ("GeneratorExp", "elt"),
+        ):
             context = replace(context, in_async_code=True)
         # FunctionDef.body, Lambda.body, ClassDef.body reset it
-        elif (node_type, attr) in (
-            ("FunctionDef", "body"),
-            ("Lambda", "body"),
-            ("ClassDef", "body"),
+        elif (
+            context.in_async_code
+            and attr == "body"
+            and node_type
+            in (
+                "FunctionDef",
+                "Lambda",
+                "ClassDef",
+            )
         ):
             context = replace(context, in_async_code=False)
 
@@ -432,18 +440,18 @@ class StdGenerator(AstGenerator):
 
         # --- in_loop: mirrors the inside() call in probability_try ---
         # Entering a loop body enables in_loop
-        if (node_type, attr) in (
-            ("For", "body"),
-            ("While", "body"),
-            ("AsyncFor", "body"),
+        if attr == "body" and node_type in (
+            "For",
+            "While",
+            "AsyncFor",
         ):
             context = replace(context, in_loop=True)
         # Entering a function/class body resets in_loop
-        elif (node_type, attr) in (
-            ("FunctionDef", "body"),
-            ("Lambda", "body"),
-            ("AsyncFunctionDef", "body"),
-            ("ClassDef", "body"),
+        elif attr == "body" and (node_type) in (
+            "FunctionDef",
+            "Lambda",
+            "AsyncFunctionDef",
+            "ClassDef",
         ):
             context = replace(context, in_loop=False)
 
