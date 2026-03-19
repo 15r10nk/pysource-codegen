@@ -221,30 +221,16 @@ class StdGenerator(AstGenerator):
         if parents[-1] in [("NamedExpr", "target")] and child_name != "Name":
             raise Invalid
 
-        in_async_code = inside(
-            ("AsyncFunctionDef.body", "GeneratorExp.elt"),
-            ("FunctionDef.body", "Lambda.body", "ClassDef.body"),
-        )
-        assert in_async_code == context.in_async_code
-
-        if child_name in ("AsyncFor", "Await", "AsyncWith") and not in_async_code:
+        if (
+            child_name in ("AsyncFor", "Await", "AsyncWith")
+            and not context.in_async_code
+        ):
             raise Invalid
 
-        if child_name in ("YieldFrom",) and in_async_code:
+        if child_name in ("YieldFrom",) and context.in_async_code:
             raise Invalid
 
-        in_loop = inside(
-            ("For.body", "While.body", "AsyncFor.body"),
-            (
-                "FunctionDef.body",
-                "Lambda.body",
-                "AsyncFunctionDef.body",
-                "ClassDef.body",
-            ),
-        )
-        assert in_loop == context.in_loop
-
-        if child_name in ("Break", "Continue") and not in_loop:
+        if child_name in ("Break", "Continue") and not context.in_loop:
             raise Invalid
 
         if inside("TryStar.handlers") and child_name in ("Break", "Continue", "Return"):
@@ -872,56 +858,10 @@ class StdGenerator(AstGenerator):
             if isinstance(node, ast.Match):
                 node = RemoveNameCleanup().visit(node)
 
-        # async nodes
-
-        in_async_code = False
-        for parent, attr in reversed(parents):
-            if parent == "AsyncFunctionDef" and attr == "body":
-                in_async_code = True
-                break
-            if parent in ("FunctionDef", "Lambda", "ClassDef", "TypeAlias"):
-                break
-            if (parent, attr) in (
-                ("arg", "annotation"),
-                ("AsyncFunctionDef", "returns"),
-                ("TypeVar", "bound"),
-            ):
-                break
-            if not py311plus and parent in comprehensions:
-                break
-
-        assert in_async_code == context.in_async_context
-
-        in_loop = False
-        for parent, attr in reversed(parents):
-            qual_parent = f"{parent}.{attr}"
-            if qual_parent in ("For.body", "While.body", "AsyncFor.body"):
-                in_loop = True
-                break
-            if qual_parent in (
-                "FunctionDef.body",
-                "Lambda.body",
-                "AsyncFunctionDef.body",
-                "ClassDef.body",
-            ):
-                break
-
-        assert in_loop == context.in_loop
-
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
-            if self.use() and not in_async_code:
+            if self.use() and not context.in_async_context:
                 for comp in node.generators:
                     comp.is_async = 0
-
-        in_excepthandler = False
-        for parent, _ in reversed(parents):
-            if parent == "ExceptHandler":
-                in_excepthandler = True
-                break
-            if parent in ("FunctionDef", "Lambda", "AsyncFunctionDef"):
-                break
-
-        assert in_excepthandler == context.in_excepthandler
 
         if isinstance(node, ast.Raise):
             if self.use() and not node.exc:
