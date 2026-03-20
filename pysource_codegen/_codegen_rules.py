@@ -700,6 +700,13 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
+        # py311+: *args can have a TypeVarTuple annotation: def f(*x: *Ts)
+        if (
+            py311plus
+            and p_info == ("arg", "annotation")
+            and par.parent_attr == "vararg"
+        ):
+            return None
         if p_info not in (
             ("Tuple", "elts"),
             ("Call", "args"),
