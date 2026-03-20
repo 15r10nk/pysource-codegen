@@ -406,12 +406,6 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if (
-            py312plus
-            and (context.in_annotation_scope or context.in_ann_assign_annotation)
-            and context.in_async_code
-        ):
-            raise Invalid
         return None
 
     def probability_try_Expr(
@@ -467,12 +461,6 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if (
-            py312plus
-            and (context.in_annotation_scope or context.in_ann_assign_annotation)
-            and context.in_async_code
-        ):
-            raise Invalid
         return None
 
     def probability_try_Interpolation(
@@ -545,12 +533,6 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if (
-            py312plus
-            and (context.in_annotation_scope or context.in_ann_assign_annotation)
-            and context.in_async_code
-        ):
-            raise Invalid
         return None
 
     def probability_try_MatchStar(
@@ -662,12 +644,6 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if (
-            py312plus
-            and (context.in_annotation_scope or context.in_ann_assign_annotation)
-            and context.in_async_code
-        ):
-            raise Invalid
         return None
 
     def probability_try_Slice(
@@ -804,6 +780,12 @@ class StdGenerator(AstGenerator):
         ctx = context.copy()
 
         # --- in_async_code ---
+        # GeneratorExp.elt is included to allow `await` in the elt of an async
+        # genexp (e.g. `(await x async for x in y)`). The comprehension rejection
+        # checks (DictComp/GeneratorExp/ListComp/SetComp) do NOT use this flag
+        # because: async comprehensions in annotation scopes are already prevented
+        # by probability_try_AsyncFor (which requires in_async_code=True, but
+        # annotation attrs are generated *before* AsyncFunctionDef.body sets it).
         if not ctx.in_async_code and (node_type, attr) in (
             ("AsyncFunctionDef", "body"),
             ("GeneratorExp", "elt"),
