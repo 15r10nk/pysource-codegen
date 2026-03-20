@@ -218,7 +218,7 @@ class AstGenerator:
     def fix(self, node: ast.AST, parent: NodeRef, context: Context) -> ast.AST:
         return node
 
-    def use(self) -> bool:
+    def use(self, condition: bool = True) -> bool:
         return True
 
     def probability(self, node: NodeRef, child_name: str, context: Context) -> float:

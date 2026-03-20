@@ -153,28 +153,33 @@ if sys.version_info >= (3, 10):
 
 class StdGenerator(AstGenerator):
 
-    def use(self) -> bool:
+    def use(self, condition: bool = True) -> bool:
         """
         Guards a post-generation fix-up step inside ``fix()``.
 
-        In normal generation this always returns ``True``, so every fix-up runs.
+        Accepts an optional ``condition`` argument.  In normal generation this
+        returns ``condition`` directly, so ``use(False)`` short-circuits a
+        fix-up whose guard is already ``False`` without consuming a probe slot.
 
-        In the test suite (``test_valid_source``) it is mocked so that it returns
-        ``False`` exactly **once** per generation run, systematically skipping each
-        guarded fix-up in turn.  The resulting AST is then:
+        In the test suite (``test_valid_source``) it is mocked so that it
+        returns ``False`` exactly **once** per generation run *and only when
+        ``condition`` is ``True``*, systematically skipping each reachable
+        fix-up in turn.  The resulting AST is then:
 
-        1. Passed to ``compile()`` — if it raises ``SyntaxError`` the skipped fix-up
-           is load-bearing and the variant is discarded.
+        1. Passed to ``compile()`` — if it raises ``SyntaxError`` the skipped
+           fix-up is load-bearing and the variant is discarded.
         2. If it compiles, ``is_valid_ast()`` (the ``AstChecker``) is run on it.
-           If the checker returns ``False`` on a tree that *does* compile, a bug has
-           been found: the checker wrongly rejects valid Python.  The source is saved
-           as a new ``tests/valid_source_samples/`` entry.
+           If the checker returns ``False`` on a tree that *does* compile, a bug
+           has been found: the checker wrongly rejects valid Python.  The source
+           is saved as a new ``tests/valid_source_samples/`` entry.
 
-        In other words, ``use()`` turns every fix-up branch into a probe: skipping it
-        once explores the space of "unfixed but still valid" ASTs that the normal
-        generator would never produce, hunting for checker blind spots.
+        In other words, ``use(condition)`` turns every fix-up branch into a
+        probe: skipping it once explores the space of "unfixed but still valid"
+        ASTs that the normal generator would never produce, hunting for checker
+        blind spots.  The ``condition`` argument prevents wasting probe slots on
+        branches whose guard is already ``False``.
         """
-        return True
+        return condition
 
     def probability_try(
         self, node: NodeRef, child_name: str, context: Context
@@ -1049,18 +1054,16 @@ class StdGenerator(AstGenerator):
         p_info = (p_type, p_attr)
 
         if isinstance(node, ast.ImportFrom):
-            if self.use() and not py310plus and node.level is None:
+            if self.use(not py310plus and node.level is None):
                 node.level = 0
 
-            if (
-                self.use()
-                and node.module is None
-                and (node.level is None or node.level == 0)
+            if self.use(
+                node.module is None and (node.level is None or node.level == 0)
             ):
                 node.level = 1
 
         if isinstance(node, ast.ExceptHandler):
-            if self.use() and node.type is None:
+            if self.use(node.type is None):
                 node.name = None
 
         if (
@@ -1082,10 +1085,8 @@ class StdGenerator(AstGenerator):
                     new_elts.append(e)
             node.elts = new_elts
 
-        if (
-            self.use()
-            and isinstance(node, ast.AnnAssign)
-            and not isinstance(node.target, ast.Name)
+        if self.use(
+            isinstance(node, ast.AnnAssign) and not isinstance(node.target, ast.Name)
         ):
             node.simple = 0
 
@@ -1098,9 +1099,8 @@ class StdGenerator(AstGenerator):
             elif node.kind not in allowed_kind:
                 node.kind = allowed_kind[hash(node.kind) % len(allowed_kind)]
 
-            if (
-                self.use()
-                and (
+            if self.use(
+                (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
@@ -1111,28 +1111,26 @@ class StdGenerator(AstGenerator):
 
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
-            if self.use() and not py310plus and node.conversion is None:
+            if self.use(not py310plus and node.conversion is None):
                 node.conversion = 5
-            if self.use() and node.conversion not in valid_conversion:
+            if self.use(node.conversion not in valid_conversion):
                 node.conversion = valid_conversion[node.conversion % 4]
 
         if hasattr(node, "ctx"):
-            if self.use() and context.in_delete_target:
+            if self.use(context.in_delete_target):
                 node.ctx = ast.Del()
-            elif self.use() and context.in_store_target:
+            elif self.use(context.in_store_target):
                 node.ctx = ast.Store()
             else:
                 node.ctx = ast.Load()
 
-        if (
-            self.use()
-            and isinstance(node, (ast.List, ast.Tuple))
-            and isinstance(node.ctx, ast.Store)
+        if self.use(
+            isinstance(node, (ast.List, ast.Tuple)) and isinstance(node.ctx, ast.Store)
         ):
             only_firstone(node.elts, lambda e: isinstance(e, ast.Starred))
 
-        if self.use() and isinstance(
-            node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)
+        if self.use(
+            isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda))
         ):
             # unique argument names
             seen = set()
@@ -1156,7 +1154,7 @@ class StdGenerator(AstGenerator):
             arguments.kwonlyargs = arguments.kwonlyargs[:min_kw_size]
             arguments.kw_defaults = arguments.kw_defaults[:min_kw_size]
 
-        if self.use() and isinstance(node, ast.AsyncFunctionDef):
+        if self.use(isinstance(node, ast.AsyncFunctionDef)):
             if any(
                 isinstance(n, (ast.Yield, ast.YieldFrom))
                 for n in walk_function_nodes(node.body)
@@ -1165,8 +1163,8 @@ class StdGenerator(AstGenerator):
                     if isinstance(n, ast.Return):
                         n.value = None
 
-        if self.use() and isinstance(node, (ast.ClassDef, ast.Call)):
-            # unique argument names
+        if self.use(isinstance(node, (ast.ClassDef, ast.Call))):
+            # unique keyword names
             seen = set()
             for i, kw in reversed(list(enumerate(node.keywords))):
                 if kw.arg:
@@ -1174,15 +1172,17 @@ class StdGenerator(AstGenerator):
                         del node.keywords[i]
                     seen.add(kw.arg)
 
-        if self.use() and isinstance(node, (ast.Try)):
+        if self.use(isinstance(node, ast.Try)):
             node.handlers[:-1] = [
                 handler for handler in node.handlers[:-1] if handler.type is not None
             ]
-            if self.use() and not node.handlers:
+            if self.use(not node.handlers):
                 node.orelse = []
 
-        if self.use() and isinstance(
-            node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+        if self.use(
+            isinstance(
+                node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
+            )
         ):
             # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
             names = {
@@ -1202,7 +1202,7 @@ class StdGenerator(AstGenerator):
                 def visit_NamedExpr(
                     self, node: ast.NamedExpr
                 ) -> ast.AST | list[ast.AST] | None:
-                    if use() and node.target.id in names:
+                    if use(node.target.id in names):
                         return self.visit(node.value)
                     return self.generic_visit(node)
 
@@ -1317,29 +1317,28 @@ class StdGenerator(AstGenerator):
                 node = RemoveNameCleanup().visit(node)
 
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
-            if self.use() and not context.in_async_context:
+            if self.use(not context.in_async_context):
                 for comp in node.generators:
                     comp.is_async = 0
 
         if isinstance(node, ast.Raise):
-            if self.use() and not node.exc:
+            if self.use(not node.exc):
                 node.cause = None
 
-        if self.use() and isinstance(node, ast.Lambda):
+        if self.use(isinstance(node, ast.Lambda)):
             # no annotation for lambda arguments
             for args in all_args(node.args):
                 for arg in args:
                     arg.annotation = None
 
-            if self.use() and node.args.vararg:
+            if self.use(node.args.vararg is not None):
                 node.args.vararg.annotation = None
 
-            if self.use() and node.args.kwarg:
+            if self.use(node.args.kwarg is not None):
                 node.args.kwarg.annotation = None
 
-        if (
-            self.use()
-            and isinstance(node, InterpolationOrFormattedValue)
+        if self.use(
+            isinstance(node, InterpolationOrFormattedValue)
             and isinstance(node.format_spec, ast.JoinedStr)
         ):
             for const in node.format_spec.values:
@@ -1351,7 +1350,7 @@ class StdGenerator(AstGenerator):
 
             use = self.use
             # type scopes
-            if self.use() and hasattr(node, "type_params"):
+            if self.use(hasattr(node, "type_params")):
                 node.type_params = unique_by(node.type_params, lambda p: p.name)
 
             def cleanup_annotation(annotation):
@@ -1395,14 +1394,12 @@ class StdGenerator(AstGenerator):
                     node.args.vararg,
                     node.args.kwarg,
                 ]:
-                    if (
-                        self.use()
-                        and func_arg is not None
-                        and func_arg.annotation is not None
+                    if self.use(
+                        func_arg is not None and func_arg.annotation is not None
                     ):
                         func_arg.annotation = cleanup_annotation(func_arg.annotation)
 
-                if self.use() and node.returns is not None:
+                if self.use(node.returns is not None):
                     node.returns = cleanup_annotation(node.returns)
 
             if isinstance(node, ast.ClassDef) and node.type_params:
@@ -1412,19 +1409,15 @@ class StdGenerator(AstGenerator):
                         kw.value = cleanup_annotation(kw.value)
 
                 for n in ast.walk(node):
-                    if self.use() and isinstance(n, ast.TypeAlias):
+                    if self.use(isinstance(n, ast.TypeAlias)):
                         n.value = cleanup_annotation(n.value)
 
             if isinstance(node, ast.ClassDef):
                 for n in ast.walk(node):
-                    if (
-                        self.use()
-                        and isinstance(n, ast.TypeVar)
-                        and n.bound is not None
-                    ):
+                    if self.use(isinstance(n, ast.TypeVar) and n.bound is not None):
                         n.bound = cleanup_annotation(n.bound)
 
-            if self.use() and isinstance(node, ast.AnnAssign):
+            if self.use(isinstance(node, ast.AnnAssign)):
                 node.annotation = cleanup_annotation(node.annotation)
 
         if sys.version_info >= (3, 13):
@@ -1436,13 +1429,12 @@ class StdGenerator(AstGenerator):
                 for child in reversed(node.type_params):
                     if child.default_value is None:
                         no_default_seen = True
-                    elif no_default_seen and self.use():
+                    elif self.use(no_default_seen):
                         child.default_value = None
 
         if sys.version_info >= (3, 14):
-            if (
-                self.use()
-                and isinstance(node, ast.Interpolation)
+            if self.use(
+                isinstance(node, ast.Interpolation)
                 and isinstance(node.value, ast.Constant)
             ):
                 node.value.value = str(node.value.value)
@@ -1452,7 +1444,7 @@ class StdGenerator(AstGenerator):
     def fix_result(self, node: ast.AST) -> ast.AST:
         if sys.version_info >= (3, 14):
             for n in walk_childs_first(node):
-                if self.use() and isinstance(n, ast.Interpolation):
+                if self.use(isinstance(n, ast.Interpolation)):
                     f_str = ast.JoinedStr(
                         [
                             ast.FormattedValue(

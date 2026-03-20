@@ -95,10 +95,12 @@ def generate_valid_source(seed: int) -> bool:
         current_index: int = 0
 
         class TestGenerator(StdGenerator):
-            def use(self: Any) -> bool:
+            def use(self: Any, condition: bool = True) -> bool:
                 nonlocal current_index
                 nonlocal ignored_something
 
+                if not condition:
+                    return False
                 ignore = current_index == ignore_index
                 current_index += 1
                 if ignore:
