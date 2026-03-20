@@ -865,8 +865,10 @@ class StdGenerator(AstGenerator):
         elif not ctx.in_match_value:
             ctx.in_match_value_unaryop = False
 
-        # --- in_match_class_cls: inside MatchClass.cls ---
-        ctx.in_match_class_cls = node_type == "MatchClass" and attr == "cls"
+        # --- in_match_class_cls: inside MatchClass.cls (propagates through Attribute.value chain) ---
+        ctx.in_match_class_cls = (node_type == "MatchClass" and attr == "cls") or (
+            ctx.in_match_class_cls and node_type == "Attribute" and attr == "value"
+        )
 
         # --- in_comprehension: inside any comprehension node ---
         if node_type in comprehensions:
