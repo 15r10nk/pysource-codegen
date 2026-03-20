@@ -960,8 +960,15 @@ class StdGenerator(AstGenerator):
         ):
             ctx.in_delete_target = False
 
-        # --- in_type_scope: inside TypeAlias.value or TypeVar.bound ---
-        if (node_type, attr) in (("TypeAlias", "value"), ("TypeVar", "bound")):
+        # --- in_type_scope: inside TypeAlias.value or TypeVar.bound or type_param default_value ---
+        if (node_type, attr) in (
+            ("TypeAlias", "value"),
+            ("TypeVar", "bound"),
+            # py3.13+: default_value has the same walrus/yield/await restrictions
+            ("TypeVar", "default_value"),
+            ("TypeVarTuple", "default_value"),
+            ("ParamSpec", "default_value"),
+        ):
             ctx.in_type_scope = True
         elif attr == "body" and node_type in (
             "FunctionDef",
