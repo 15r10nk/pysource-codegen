@@ -1399,11 +1399,13 @@ class StdGenerator(AstGenerator):
         if sys.version_info >= (3, 13):
             if hasattr(node, "type_params"):
                 # non-default type parameter 'name_1' follows default type parameter
-                no_default = False
+                # All default params must come at the end: clear defaults from any
+                # param that appears (in forward order) before a non-default param.
+                no_default_seen = False
                 for child in reversed(node.type_params):
-                    if child.default_value is not None:
-                        no_default = True
-                    if self.use() and no_default:
+                    if child.default_value is None:
+                        no_default_seen = True
+                    elif no_default_seen and self.use():
                         child.default_value = None
 
         if sys.version_info >= (3, 14):
