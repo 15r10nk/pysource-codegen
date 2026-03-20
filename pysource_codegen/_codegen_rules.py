@@ -903,9 +903,11 @@ class StdGenerator(AstGenerator):
             ctx.in_comprehension = False
 
         # --- in_class_not_function: inside ClassDef.body but not nested function/lambda ---
+        # Note: only clear on .body entry, not on decorator_list/args/returns which are
+        # evaluated in the outer (class) scope, not the function scope.
         if attr == "body" and node_type == "ClassDef":
             ctx.in_class_not_function = True
-        elif is_function_def:
+        elif attr == "body" and is_function_def:
             ctx.in_class_not_function = False
 
         # --- in_annotation_scope: annotation/type-alias positions where yield/await/walrus forbidden ---
