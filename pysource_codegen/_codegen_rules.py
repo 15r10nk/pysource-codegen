@@ -917,6 +917,10 @@ class StdGenerator(AstGenerator):
             ("arg", "annotation"),
             ("TypeAlias", "value"),
             ("TypeVar", "bound"),
+            # py3.13+: type param defaults also forbid walrus/yield/await
+            ("TypeVar", "default_value"),
+            ("TypeVarTuple", "default_value"),
+            ("ParamSpec", "default_value"),
         ):
             ctx.in_annotation_scope = True
         elif attr == "body" and node_type in (
