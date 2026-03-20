@@ -6,8 +6,8 @@ from pysource_codegen._codegen import generate_ast
 
 pr = cProfile.Profile()
 pr.enable()
-for i in range(5):
-    generate_ast(i, depth_limit=5)
+for i in range(40):
+    generate_ast(i)
 pr.disable()
 
 s = io.StringIO()
