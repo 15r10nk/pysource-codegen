@@ -4,7 +4,7 @@ import ast
 import random
 import sys
 from dataclasses import dataclass
-from dataclasses import fields
+from dataclasses import fields as _dc_fields
 from dataclasses import replace
 from typing import Callable
 from typing import Union
@@ -71,12 +71,23 @@ class Context:
     in_type_scope: bool = False
     # True inside arg.annotation / FunctionDef.returns / AsyncFunctionDef.returns
     in_annotation_return_scope: bool = False
+    # Nesting depth of FormattedValue.format_spec in the ancestor chain
+    fstring_format_depth: int = 0
+    # Nesting depth of FormattedValue.value in the ancestor chain
+    fstring_value_depth: int = 0
+    # True when the nearest non-Tuple/List/Starred ancestor is a store-target position
+    # (Assign.targets, For.target, AnnAssign.target, AugAssign.target, NamedExpr.target,
+    #  TypeAlias.name, withitem.optional_vars, comprehension.target, AsyncFor.target)
+    in_store_target: bool = False
 
     def copy(self) -> Context:
         new = Context.__new__(Context)
-        for f in fields(Context):
-            object.__setattr__(new, f.name, getattr(self, f.name))
+        for name in _CONTEXT_FIELD_NAMES:
+            object.__setattr__(new, name, getattr(self, name))
         return new
+
+
+_CONTEXT_FIELD_NAMES: tuple[str, ...] = tuple(f.name for f in _dc_fields(Context))
 
 
 @dataclass
@@ -195,7 +206,7 @@ class AstGenerator:
     def min_attr_length(self, type_name: str, attr_name: str) -> int:
         return 0
 
-    def none_allowed(self, parent: NodeRef) -> bool:
+    def none_allowed(self, child: NodeRef) -> bool:
         return True
 
     def fix(self, node: ast.AST, parent: NodeRef, context: Context) -> ast.AST:
@@ -278,7 +289,7 @@ class AstGenerator:
         quantity: str,
         new_node: NodeRef,
     ) -> bool:
-        return "?" in quantity and self.none_allowed(new_node) and self.cnd()
+        return "?" in quantity and self.none_allowed(child_parent_node) and self.cnd()
 
     def generate_NodeType(
         self,

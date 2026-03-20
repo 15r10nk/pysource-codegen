@@ -163,28 +163,31 @@ class StdGenerator(AstGenerator):
     def probability_try(
         self, node: NodeRef, child_name: str, context: Context
     ) -> float:
-        parents = node.all_parents()
-        parent_types = [p[0] for p in parents]
+        par = node.parent
+        gpar = par.parent  # type: ignore[union-attr]
+        p_type = type(par.node).__name__  # type: ignore[union-attr]
+        p_attr = node.parent_attr
+        p_info = (p_type, p_attr)
 
         if child_name in ("Store", "Del", "Load"):
             return 1
 
         if child_name == "Slice" and not (
-            parents[-1] == ("Subscript", "slice")
-            or parents[-2:]
-            == [
-                ("Subscript", "slice"),
-                ("Tuple", "elts"),
-            ]
+            p_info == ("Subscript", "slice")
+            or (
+                p_info == ("Tuple", "elts")
+                and gpar is not None
+                and (type(gpar.node).__name__, par.parent_attr) == ("Subscript", "slice")  # type: ignore[union-attr]
+            )
         ):
             raise Invalid
 
-        if child_name == "ExtSlice" and parents[-1] == ("ExtSlice", "dims"):
+        if child_name == "ExtSlice" and p_info == ("ExtSlice", "dims"):
             # SystemError('extended slice invalid in nested slice')
             raise Invalid
 
         # f-string
-        if parents[-1] == ("JoinedStr", "values") and child_name not in (
+        if p_info == ("JoinedStr", "values") and child_name not in (
             "Constant",
             "FormattedValue",
         ):
@@ -193,31 +196,28 @@ class StdGenerator(AstGenerator):
         if 0:
             if (
                 not py312plus
-                and parents[-1] == ("FormattedValue", "value")
+                and p_info == ("FormattedValue", "value")
                 and child_name != "Constant"
             ):
                 # TODO: WHY?
                 raise Invalid
 
+        if p_info == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
+            raise Invalid
+
         if (
-            parents[-1] == ("FormattedValue", "format_spec")
-            and child_name != "JoinedStr"
+            child_name == "JoinedStr"
+            and context.fstring_format_depth > f_string_format_limit
         ):
             raise Invalid
 
         if (
             child_name == "JoinedStr"
-            and parents.count(("FormattedValue", "format_spec")) > f_string_format_limit
+            and context.fstring_value_depth > f_string_expr_limit
         ):
             raise Invalid
 
-        if (
-            child_name == "JoinedStr"
-            and parents.count(("FormattedValue", "value")) > f_string_expr_limit
-        ):
-            raise Invalid
-
-        if child_name == "FormattedValue" and parents[-1][0] != "JoinedStr":
+        if child_name == "FormattedValue" and p_type != "JoinedStr":
             # TODO: doc says this should be valid, maybe a bug in the python doc
             # see https://github.com/python/cpython/issues/111257
             raise Invalid
@@ -249,14 +249,14 @@ class StdGenerator(AstGenerator):
         if not py38plus and child_name == "Continue" and context.in_finally:
             raise Invalid
 
-        if parents[-1] == ("MatchMapping", "keys") and child_name != "Constant":
+        if p_info == ("MatchMapping", "keys") and child_name != "Constant":
             # TODO: find all allowed key types
             raise Invalid
 
-        if child_name == "MatchStar" and parent_types[-1] != "MatchSequence":
+        if child_name == "MatchStar" and p_type != "MatchSequence":
             raise Invalid
 
-        if child_name == "Starred" and parents[-1] not in (
+        if child_name == "Starred" and p_info not in (
             ("Tuple", "elts"),
             ("Call", "args"),
             ("List", "elts"),
@@ -267,23 +267,10 @@ class StdGenerator(AstGenerator):
 
         assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
-        assign_context = [
-            p for p in parents if p[0] not in ("Tuple", "List", "Starred")
-        ]
+        if context.in_store_target and child_name not in assign_target:
+            raise Invalid
 
-        if assign_context and assign_context[-1] in [
-            ("For", "target"),
-            ("AsyncFor", "target"),
-            ("AnnAssign", "target"),
-            ("AugAssign", "target"),
-            ("Assign", "targets"),
-            ("withitem", "optional_vars"),
-            ("comprehension", "target"),
-        ]:
-            if child_name not in assign_target:
-                raise Invalid
-
-        if parents[-1] in [("AugAssign", "target"), ("AnnAssign", "target")]:
+        if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
             if child_name in ("Starred", "List", "Tuple"):
                 raise Invalid
 
@@ -291,11 +278,11 @@ class StdGenerator(AstGenerator):
             # TODO this might be a cpython bug
             raise Invalid
 
-        if parents[-1] in [("AnnAssign", "target")]:
+        if p_info == ("AnnAssign", "target"):
             if child_name not in ("Name", "Attribute", "Subscript"):
                 raise Invalid
 
-        if parents[-1] in [("NamedExpr", "target")] and child_name != "Name":
+        if p_info == ("NamedExpr", "target") and child_name != "Name":
             raise Invalid
 
         if (
@@ -336,14 +323,14 @@ class StdGenerator(AstGenerator):
         ):
             raise Invalid
 
-        if parents[-1] == ("MatchValue", "value") and child_name == "Name":
+        if p_info == ("MatchValue", "value") and child_name == "Name":
             raise Invalid
 
         if context.in_match_class_cls:
             if child_name not in ("Name", "Attribute"):
                 raise Invalid
 
-        if parents[-1] == ("comprehension", "iter") and child_name == "NamedExpr":
+        if p_info == ("comprehension", "iter") and child_name == "NamedExpr":
             raise Invalid
 
         if context.in_comprehension and child_name in ("Yield", "YieldFrom"):
@@ -359,29 +346,31 @@ class StdGenerator(AstGenerator):
             # SyntaxError: assignment expression within a comprehension cannot be used in a class body
             raise Invalid
 
-        if not py39plus and any(p[1] == "decorator_list" for p in parents):
-            # restricted decorators
-            # see https://peps.python.org/pep-0614/
+        if not py39plus:
+            parents = node.all_parents()
+            if any(p[1] == "decorator_list" for p in parents):
+                # restricted decorators
+                # see https://peps.python.org/pep-0614/
 
-            deco_parents = list(
-                itertools.takewhile(
-                    lambda a: a[1] != "decorator_list", reversed(parents)
-                )
-            )[::-1]
+                deco_parents = list(
+                    itertools.takewhile(
+                        lambda a: a[1] != "decorator_list", reversed(parents)
+                    )
+                )[::-1]
 
-            def valid_deco_parents(parents: Sequence[tuple[str, str]]) -> bool:
-                # Call?,Attribute*
-                parents = list(parents)
-                if parents and parents[0] == ("Call", "func"):
-                    parents.pop()
-                return all(p == ("Attribute", "value") for p in parents)
+                def valid_deco_parents(parents: Sequence[tuple[str, str]]) -> bool:
+                    # Call?,Attribute*
+                    parents = list(parents)
+                    if parents and parents[0] == ("Call", "func"):
+                        parents.pop()
+                    return all(p == ("Attribute", "value") for p in parents)
 
-            if valid_deco_parents(deco_parents) and child_name != "Name":
-                raise Invalid
+                if valid_deco_parents(deco_parents) and child_name != "Name":
+                    raise Invalid
 
         # type alias
         if py312plus:
-            if parents[-1] == ("TypeAlias", "name") and child_name != "Name":
+            if p_info == ("TypeAlias", "name") and child_name != "Name":
                 raise Invalid
 
             if (
@@ -428,25 +417,22 @@ class StdGenerator(AstGenerator):
             if child_name == "NamedExpr" and context.in_annotation_return_scope:
                 raise Invalid
 
-            if not parent_types[-1] == "TemplateStr" and child_name == "Interpolation":
+            if p_type != "TemplateStr" and child_name == "Interpolation":
                 raise Invalid
 
-            if parents[-1] == ("TemplateStr", "values") and child_name not in (
+            if p_info == ("TemplateStr", "values") and child_name not in (
                 "Interpolation",
                 "Constant",
             ):
                 raise Invalid
 
-            if (
-                parents[-1] == ("Interpolation", "format_spec")
-                and child_name != "JoinedStr"
-            ):
+            if p_info == ("Interpolation", "format_spec") and child_name != "JoinedStr":
                 raise Invalid
 
         if child_name == "Expr":
             return 30
 
-        if child_name == "NonLocal" and parents[-1] == ("Module", "body"):
+        if child_name == "NonLocal" and p_info == ("Module", "body"):
             raise Invalid
 
         return 1
@@ -639,11 +625,40 @@ class StdGenerator(AstGenerator):
         ):
             ctx.in_annotation_return_scope = False
 
+        # --- fstring_format_depth: count FormattedValue.format_spec ancestors ---
+        if (node_type, attr) == ("FormattedValue", "format_spec"):
+            ctx.fstring_format_depth += 1
+
+        # --- fstring_value_depth: count FormattedValue.value ancestors ---
+        if (node_type, attr) == ("FormattedValue", "value"):
+            ctx.fstring_value_depth += 1
+
+        # --- in_store_target: transparent through Tuple/List/Starred ---
+        if (node_type, attr) in (
+            ("For", "target"),
+            ("AsyncFor", "target"),
+            ("AnnAssign", "target"),
+            ("AugAssign", "target"),
+            ("Assign", "targets"),
+            ("withitem", "optional_vars"),
+            ("comprehension", "target"),
+            ("NamedExpr", "target"),
+            ("TypeAlias", "name"),
+        ):
+            ctx.in_store_target = True
+        elif not (ctx.in_store_target and node_type in ("Tuple", "List", "Starred")):
+            ctx.in_store_target = False
+
         return ctx
 
     def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
-
-        parents = parent_node.all_parents()
+        p_attr = parent_node.parent_attr
+        p_type = (
+            type(parent_node.parent.node).__name__
+            if parent_node.parent is not None and parent_node.parent.node is not None
+            else ""
+        )
+        p_info = (p_type, p_attr)
 
         if isinstance(node, ast.ImportFrom):
             if self.use() and not py310plus and node.level is None:
@@ -663,7 +678,7 @@ class StdGenerator(AstGenerator):
         if (
             sys.version_info < (3, 11)
             and isinstance(node, ast.Tuple)
-            and parents[-1] == ("Subscript", "slice")
+            and p_info == ("Subscript", "slice")
         ):
             # a[(a:b,*c)] <- not valid
             # TODO check this
@@ -697,10 +712,9 @@ class StdGenerator(AstGenerator):
 
             if (
                 self.use()
-                and parents
                 and (
-                    parents[-1] == ("JoinedStr", "values")
-                    or parents[-1] == ("TemplateStr", "values")
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
                 )
                 and not isinstance(node.value, str)
             ):
@@ -714,33 +728,10 @@ class StdGenerator(AstGenerator):
             if self.use() and node.conversion not in valid_conversion:
                 node.conversion = valid_conversion[node.conversion % 4]
 
-        assign_context = [
-            p for p in parents if p[0] not in ("Tuple", "List", "Starred")
-        ]
-
         if hasattr(node, "ctx"):
-            if (
-                self.use()
-                and assign_context
-                and assign_context[-1] == ("Delete", "targets")
-            ):
+            if self.use() and context.in_delete_target:
                 node.ctx = ast.Del()
-            elif (
-                self.use()
-                and assign_context
-                and assign_context[-1]
-                in (
-                    ("Assign", "targets"),
-                    ("AnnAssign", "target"),
-                    ("AugAssign", "target"),
-                    ("NamedExpr", "target"),
-                    ("TypeAlias", "name"),
-                    ("For", "target"),
-                    ("AsyncFor", "target"),
-                    ("withitem", "optional_vars"),
-                    ("comprehension", "target"),
-                )
-            ):
+            elif self.use() and context.in_store_target:
                 node.ctx = ast.Store()
             else:
                 node.ctx = ast.Load()
@@ -1465,9 +1456,15 @@ class StdGenerator(AstGenerator):
 
         return 0
 
-    def none_allowed(self, parent: NodeRef) -> bool:
-        parents = parent.all_parents()
-        if parents[-2:] == [("TryStar", "handlers"), ("ExceptHandler", "type")]:
+    def none_allowed(self, child: NodeRef) -> bool:
+        # ExceptHandler.type must not be None when ExceptHandler is inside TryStar.handlers
+        if (
+            child.parent_attr == "type"
+            and type(child.parent.node).__name__ == "ExceptHandler"  # type: ignore[union-attr]
+            and child.parent.parent is not None  # type: ignore[union-attr]
+            and child.parent.parent_attr == "handlers"  # type: ignore[union-attr]
+            and type(child.parent.parent.node).__name__ == "TryStar"  # type: ignore[union-attr]
+        ):
             return False
         return True
 
