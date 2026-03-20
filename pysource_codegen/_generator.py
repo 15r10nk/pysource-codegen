@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import random
+import sys
 from dataclasses import dataclass
+from dataclasses import fields
 from dataclasses import replace
 from typing import Callable
 from typing import Union
@@ -20,7 +22,10 @@ class Invalid(Exception):
     pass
 
 
-@dataclass(slots=True)
+_dataclass_slots: dict = {"slots": True} if sys.version_info >= (3, 10) else {}
+
+
+@dataclass(**_dataclass_slots)
 class Context:
     """Mutable scope-tracking context threaded through the generator.
 
@@ -69,8 +74,8 @@ class Context:
 
     def copy(self) -> Context:
         new = Context.__new__(Context)
-        for slot in Context.__slots__:
-            object.__setattr__(new, slot, getattr(self, slot))
+        for f in fields(Context):
+            object.__setattr__(new, f.name, getattr(self, f.name))
         return new
 
 
