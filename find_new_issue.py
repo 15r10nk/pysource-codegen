@@ -30,11 +30,12 @@ if __name__ == "__main__":
                 i = randint(0, 10000000000)
                 if generate_invalid_ast(i) if i % 2 == 0 else generate_valid_source(i):
                     found.set()
-                    print(f"Found seed: {i}")
                     return i
 
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
             futures = [executor.submit(try_seed) for _ in range(args.workers)]
             for future in as_completed(futures):
-                if future.result() is not None:
-                    break
+                result = future.result()
+                if result is not None:
+                    print(f"Found seed: {result}")
+                    os._exit(0)

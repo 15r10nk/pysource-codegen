@@ -336,7 +336,9 @@ class StdGenerator(AstGenerator):
     ) -> float | None:
         if not context.in_async_code:
             raise Invalid
-        if py312plus and context.in_ann_assign_annotation:
+        if py312plus and (
+            context.in_ann_assign_annotation or context.in_annotation_scope
+        ):
             raise Invalid
         return None
 
