@@ -172,21 +172,15 @@ class StdGenerator(AstGenerator):
         if child_name in ("Store", "Del", "Load"):
             return 1
 
-        if child_name == "Slice" and not (
-            p_info == ("Subscript", "slice")
-            or (
-                p_info == ("Tuple", "elts")
-                and gpar is not None
-                and (type(gpar.node).__name__, par.parent_attr) == ("Subscript", "slice")  # type: ignore[union-attr]
+        child_method = self._child_dispatch.get(child_name)
+        if child_method is not None:
+            result = child_method(
+                self, node, par, gpar, p_type, p_attr, p_info, context
             )
-        ):
-            raise Invalid
+            if result is not None:
+                return result
 
-        if child_name == "ExtSlice" and p_info == ("ExtSlice", "dims"):
-            # SystemError('extended slice invalid in nested slice')
-            raise Invalid
-
-        # f-string
+        # f-string structural exclusions
         if p_info == ("JoinedStr", "values") and child_name not in (
             "Constant",
             "FormattedValue",
@@ -205,23 +199,6 @@ class StdGenerator(AstGenerator):
         if p_info == ("FormattedValue", "format_spec") and child_name != "JoinedStr":
             raise Invalid
 
-        if (
-            child_name == "JoinedStr"
-            and context.fstring_format_depth > f_string_format_limit
-        ):
-            raise Invalid
-
-        if (
-            child_name == "JoinedStr"
-            and context.fstring_value_depth > f_string_expr_limit
-        ):
-            raise Invalid
-
-        if child_name == "FormattedValue" and p_type != "JoinedStr":
-            # TODO: doc says this should be valid, maybe a bug in the python doc
-            # see https://github.com/python/cpython/issues/111257
-            raise Invalid
-
         if context.in_delete_target and child_name not in (
             "Name",
             "Attribute",
@@ -231,51 +208,9 @@ class StdGenerator(AstGenerator):
         ):
             raise Invalid
 
-        # function statements
-        if (
-            child_name
-            in (
-                "Return",
-                "Yield",
-                "YieldFrom",
-            )
-            and not context.in_function
-        ):
-            raise Invalid
-        # function statements
-        if child_name in ("Nonlocal",) and not context.in_function_or_class:
-            raise Invalid
-
-        if not py38plus and child_name == "Continue" and context.in_finally:
-            raise Invalid
-
-        if p_info == ("MatchMapping", "keys") and child_name != "Constant":
-            # TODO: find all allowed key types
-            raise Invalid
-
-        if child_name == "MatchStar" and p_type != "MatchSequence":
-            raise Invalid
-
-        if child_name == "Starred" and p_info not in (
-            ("Tuple", "elts"),
-            ("Call", "args"),
-            ("List", "elts"),
-            ("Set", "elts"),
-            ("ClassDef", "bases"),
-        ):
-            raise Invalid
-
         assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
         if context.in_store_target and child_name not in assign_target:
-            raise Invalid
-
-        if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
-            if child_name in ("Starred", "List", "Tuple"):
-                raise Invalid
-
-        if context.in_ann_assign_target and child_name == "Starred":
-            # TODO this might be a cpython bug
             raise Invalid
 
         if p_info == ("AnnAssign", "target"):
@@ -285,20 +220,8 @@ class StdGenerator(AstGenerator):
         if p_info == ("NamedExpr", "target") and child_name != "Name":
             raise Invalid
 
-        if (
-            child_name in ("AsyncFor", "Await", "AsyncWith")
-            and not context.in_async_code
-        ):
-            raise Invalid
-
-        if child_name in ("YieldFrom",) and context.in_async_code:
-            raise Invalid
-
-        if child_name in ("Break", "Continue") and not context.in_loop:
-            raise Invalid
-
-        if context.in_trystar_handler and child_name in ("Break", "Continue", "Return"):
-            # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
+        if p_info == ("MatchMapping", "keys") and child_name != "Constant":
+            # TODO: find all allowed key types
             raise Invalid
 
         if context.in_match_value and child_name not in (
@@ -316,35 +239,9 @@ class StdGenerator(AstGenerator):
         ):
             raise Invalid
 
-        if context.in_match_value_unaryop and child_name in (
-            "Name",
-            "UnaryOp",
-            "Attribute",
-        ):
-            raise Invalid
-
-        if p_info == ("MatchValue", "value") and child_name == "Name":
-            raise Invalid
-
         if context.in_match_class_cls:
             if child_name not in ("Name", "Attribute"):
                 raise Invalid
-
-        if p_info == ("comprehension", "iter") and child_name == "NamedExpr":
-            raise Invalid
-
-        if context.in_comprehension and child_name in ("Yield", "YieldFrom"):
-            # SyntaxError: 'yield' inside list comprehension
-            raise Invalid
-
-        if (
-            context.in_comprehension
-            # TODO restrict to comprehension inside ClassDef
-            and context.in_class_not_function
-            and child_name == "NamedExpr"
-        ):
-            # SyntaxError: assignment expression within a comprehension cannot be used in a class body
-            raise Invalid
 
         if not py39plus:
             parents = node.all_parents()
@@ -373,53 +270,7 @@ class StdGenerator(AstGenerator):
             if p_info == ("TypeAlias", "name") and child_name != "Name":
                 raise Invalid
 
-            if (
-                child_name == "Lambda"
-                and context.in_type_alias_in_class
-                and sys.version_info < (3, 13)
-            ):
-                # SyntaxError('Cannot use lambda in annotation scope within class scope')
-                raise Invalid
-
-            if (
-                child_name
-                in (
-                    # "NamedExpr",
-                    "Yield",
-                    "YieldFrom",
-                    "Await",
-                    # "DictComp",
-                    # "ListComp",
-                    # "SetComp",
-                )
-                and context.in_annotation_scope
-            ):
-                # todo this should only be invalid in type scopes (when the class/def has type parameters)
-                # and only for async comprehensions
-                raise Invalid
-
-            if child_name in ("NamedExpr",) and context.in_type_scope:
-                # todo this should only be invalid in type scopes (when the class/def has type parameters)
-                # and only for async comprehensions
-                raise Invalid
-
-            if child_name == "Await" and context.in_ann_assign_annotation:
-                raise Invalid
-
-            if (
-                (context.in_annotation_scope or context.in_ann_assign_annotation)
-                and context.in_async_code
-                and child_name in comprehensions
-            ):
-                raise Invalid
-
         if sys.version_info >= (3, 14):
-            if child_name == "NamedExpr" and context.in_annotation_return_scope:
-                raise Invalid
-
-            if p_type != "TemplateStr" and child_name == "Interpolation":
-                raise Invalid
-
             if p_info == ("TemplateStr", "values") and child_name not in (
                 "Interpolation",
                 "Constant",
@@ -429,13 +280,491 @@ class StdGenerator(AstGenerator):
             if p_info == ("Interpolation", "format_spec") and child_name != "JoinedStr":
                 raise Invalid
 
-        if child_name == "Expr":
-            return 30
-
-        if child_name == "NonLocal" and p_info == ("Module", "body"):
-            raise Invalid
-
         return 1
+
+    def probability_try_Attribute(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if context.in_match_value_unaryop:
+            raise Invalid
+        return None
+
+    def probability_try_AsyncFor(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_async_code:
+            raise Invalid
+        return None
+
+    def probability_try_AsyncWith(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_async_code:
+            raise Invalid
+        return None
+
+    def probability_try_Await(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_async_code:
+            raise Invalid
+        if py312plus and context.in_ann_assign_annotation:
+            raise Invalid
+        return None
+
+    def probability_try_Break(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_loop:
+            raise Invalid
+        if context.in_trystar_handler:
+            # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
+            raise Invalid
+        return None
+
+    def probability_try_Continue(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not py38plus and context.in_finally:
+            raise Invalid
+        if not context.in_loop:
+            raise Invalid
+        if context.in_trystar_handler:
+            # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
+            raise Invalid
+        return None
+
+    def probability_try_DictComp(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if (
+            py312plus
+            and (context.in_annotation_scope or context.in_ann_assign_annotation)
+            and context.in_async_code
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_Expr(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        return 30
+
+    def probability_try_ExtSlice(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info == ("ExtSlice", "dims"):
+            # SystemError('extended slice invalid in nested slice')
+            raise Invalid
+        return None
+
+    def probability_try_FormattedValue(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_type != "JoinedStr":
+            # TODO: doc says this should be valid, maybe a bug in the python doc
+            # see https://github.com/python/cpython/issues/111257
+            raise Invalid
+        return None
+
+    def probability_try_GeneratorExp(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if (
+            py312plus
+            and (context.in_annotation_scope or context.in_ann_assign_annotation)
+            and context.in_async_code
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_Interpolation(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if sys.version_info >= (3, 14) and p_type != "TemplateStr":
+            raise Invalid
+        return None
+
+    def probability_try_JoinedStr(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if (
+            context.fstring_format_depth > f_string_format_limit
+            or context.fstring_value_depth > f_string_expr_limit
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_Lambda(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if py312plus and context.in_type_alias_in_class and sys.version_info < (3, 13):
+            # SyntaxError('Cannot use lambda in annotation scope within class scope')
+            raise Invalid
+        return None
+
+    def probability_try_List(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
+            raise Invalid
+        return None
+
+    def probability_try_ListComp(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if (
+            py312plus
+            and (context.in_annotation_scope or context.in_ann_assign_annotation)
+            and context.in_async_code
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_MatchStar(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_type != "MatchSequence":
+            raise Invalid
+        return None
+
+    def probability_try_Name(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if context.in_match_value_unaryop:
+            raise Invalid
+        if p_info == ("MatchValue", "value"):
+            raise Invalid
+        return None
+
+    def probability_try_NamedExpr(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info == ("comprehension", "iter"):
+            raise Invalid
+        if context.in_comprehension and context.in_class_not_function:
+            # SyntaxError: assignment expression within a comprehension cannot be used in a class body
+            raise Invalid
+        if py312plus and context.in_type_scope:
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            raise Invalid
+        if sys.version_info >= (3, 14) and context.in_annotation_return_scope:
+            raise Invalid
+        return None
+
+    def probability_try_NonLocal(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info == ("Module", "body"):
+            raise Invalid
+        return None
+
+    def probability_try_Nonlocal(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        # function statements
+        if not context.in_function_or_class:
+            raise Invalid
+        return None
+
+    def probability_try_Return(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_function:
+            raise Invalid
+        if context.in_trystar_handler:
+            # SyntaxError: 'break', 'continue' and 'return' cannot appear in an except* block
+            raise Invalid
+        return None
+
+    def probability_try_SetComp(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if (
+            py312plus
+            and (context.in_annotation_scope or context.in_ann_assign_annotation)
+            and context.in_async_code
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_Slice(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not (
+            p_info == ("Subscript", "slice")
+            or (
+                p_info == ("Tuple", "elts")
+                and gpar is not None
+                and (type(gpar.node).__name__, par.parent_attr) == ("Subscript", "slice")  # type: ignore[union-attr]
+            )
+        ):
+            raise Invalid
+        return None
+
+    def probability_try_Starred(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info not in (
+            ("Tuple", "elts"),
+            ("Call", "args"),
+            ("List", "elts"),
+            ("Set", "elts"),
+            ("ClassDef", "bases"),
+        ):
+            raise Invalid
+        if context.in_ann_assign_target:
+            # TODO this might be a cpython bug
+            raise Invalid
+        return None
+
+    def probability_try_Tuple(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
+            raise Invalid
+        return None
+
+    def probability_try_UnaryOp(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if context.in_match_value_unaryop:
+            raise Invalid
+        return None
+
+    def probability_try_Yield(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_function:
+            raise Invalid
+        if context.in_comprehension:
+            # SyntaxError: 'yield' inside list comprehension
+            raise Invalid
+        if py312plus and context.in_annotation_scope:
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            raise Invalid
+        return None
+
+    def probability_try_YieldFrom(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if not context.in_function:
+            raise Invalid
+        if context.in_async_code:
+            raise Invalid
+        if context.in_comprehension:
+            # SyntaxError: 'yield' inside list comprehension
+            raise Invalid
+        if py312plus and context.in_annotation_scope:
+            # todo this should only be invalid in type scopes (when the class/def has type parameters)
+            # and only for async comprehensions
+            raise Invalid
+        return None
 
     def context_before(
         self, context: Context, node: NodeRef, attr: str, index: int | None
@@ -1476,3 +1805,10 @@ class StdGenerator(AstGenerator):
             "Compare": ["ops", "comparators"],
             "Dict": ["keys", "values"],
         }
+
+
+StdGenerator._child_dispatch = {
+    name[len("probability_try_") :]: func
+    for name, func in vars(StdGenerator).items()
+    if name.startswith("probability_try_")
+}

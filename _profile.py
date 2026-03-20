@@ -1,0 +1,15 @@
+import cProfile
+import io
+import pstats
+
+from pysource_codegen._codegen import generate_ast
+
+pr = cProfile.Profile()
+pr.enable()
+for i in range(5):
+    generate_ast(i, depth_limit=5)
+pr.disable()
+
+s = io.StringIO()
+pstats.Stats(pr, stream=s).sort_stats("tottime").print_stats(30)
+print(s.getvalue())
