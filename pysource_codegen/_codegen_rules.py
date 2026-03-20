@@ -24,6 +24,7 @@ py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
+py313plus = (3, 13) <= sys.version_info
 
 comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
@@ -706,6 +707,9 @@ class StdGenerator(AstGenerator):
             and p_info == ("arg", "annotation")
             and par.parent_attr == "vararg"
         ):
+            return None
+        # py3.13+: TypeVarTuple default_value is a Starred expression: def f[*Ts = *int]()
+        if py313plus and p_info == ("TypeVarTuple", "default_value"):
             return None
         if p_info not in (
             ("Tuple", "elts"),
