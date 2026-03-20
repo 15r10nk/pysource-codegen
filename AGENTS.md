@@ -193,3 +193,9 @@ pytest --generate-samples
 - **mypy** — strict type checking across all supported Python versions via `hatch run types:check`.
 - **commitizen** — conventional commits and changelog generation.
 - **cogapp** — inline code generation in `*.md` files (`hatch run cog:update`).
+
+---
+
+## Agent Rules
+
+- **Always run `uv run run_all.py` before committing.** This runs the test suite across all supported Python versions (3.8 – 3.15) and must be fully green before any commit.
