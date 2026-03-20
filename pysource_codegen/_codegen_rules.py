@@ -25,6 +25,7 @@ py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
 py313plus = (3, 13) <= sys.version_info
+py315plus = (3, 15) <= sys.version_info
 
 comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
@@ -704,6 +705,15 @@ class StdGenerator(AstGenerator):
             return None
         # py3.13+: TypeVarTuple default_value is a Starred expression: def f[*Ts = *int]()
         if py313plus and p_info == ("TypeVarTuple", "default_value"):
+            return None
+        # py3.15+: starred expressions are allowed as comprehension elements
+        # (e.g. {*x for x in y}, [*x for x in y], (*x for x in y)) — but NOT
+        # in DictComp.key or DictComp.value.
+        if py315plus and p_info in (
+            ("SetComp", "elt"),
+            ("ListComp", "elt"),
+            ("GeneratorExp", "elt"),
+        ):
             return None
         if p_info not in (
             ("Tuple", "elts"),
@@ -1850,6 +1860,14 @@ class StdGenerator(AstGenerator):
             and child.parent.parent is not None  # type: ignore[union-attr]
             and child.parent.parent_attr == "handlers"  # type: ignore[union-attr]
             and type(child.parent.parent.node).__name__ == "TryStar"  # type: ignore[union-attr]
+        ):
+            return False
+        # Python 3.15+ marks DictComp.value as optional in the grammar, but ast.unparse
+        # does not handle DictComp(value=None) and raises AttributeError.  Forbid None
+        # here so neither the generator nor the checker ever produces such a tree.
+        if (
+            child.parent_attr == "value"
+            and type(child.parent.node).__name__ == "DictComp"  # type: ignore[union-attr]
         ):
             return False
         return True

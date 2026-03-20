@@ -62,7 +62,12 @@ class AstChecker(StdGenerator):
     def _should_place_none(self, child_parent_node, quantity, new_node):
         if "?" not in quantity:
             return False
-        return child_parent_node.relocate(self.target).node is None
+        target_is_none = child_parent_node.relocate(self.target).node is None
+        # An optional field that the generator never fills with None (none_allowed=False)
+        # should not be accepted as None in the target tree either.
+        if target_is_none and not self.none_allowed(child_parent_node):
+            raise _InvalidTree()
+        return target_is_none
 
     def generate_BuiltinNodeType(
         self, place, parent_node, info, ast_type_name, depth, stop, context
