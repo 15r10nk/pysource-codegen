@@ -335,7 +335,24 @@ class StdGenerator(AstGenerator):
         context: Context,
     ) -> float | None:
         if not context.in_async_code:
-            raise Invalid
+            # await is also valid in a GeneratorExp's inner scope:
+            # - any comprehension's ifs clause
+            # - non-first comprehension's iter (generators[1:].iter)
+            in_genexp_inner = (
+                p_type == "comprehension"
+                and gpar is not None
+                and type(gpar.node).__name__ == "GeneratorExp"
+                and (
+                    p_attr == "ifs"
+                    or (
+                        p_attr == "iter"
+                        and par.parent_attr_index is not None
+                        and par.parent_attr_index > 0
+                    )
+                )
+            )
+            if not in_genexp_inner:
+                raise Invalid
         if py312plus and (
             context.in_ann_assign_annotation or context.in_annotation_scope
         ):

@@ -12,7 +12,7 @@ from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 
-# from pysource_minimize import minimize  # Unresolved, comment out for now
+from pysource_minimize import minimize  # Unresolved, comment out for now
 
 from .test_invalid_ast import does_compile
 
@@ -65,7 +65,7 @@ def minimize_if_valid(code: str) -> bool:
 
     if bug_found(code):
         # minimize is not available, so skip minimization
-        # code = minimize(code, bug_found)
+        code = minimize(code, bug_found)
         print()
         print("minimized:")
         print(code)
