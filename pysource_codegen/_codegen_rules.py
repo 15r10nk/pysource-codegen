@@ -1441,6 +1441,7 @@ class StdGenerator(AstGenerator):
                 globals: Iterable[str],
                 type_params: Iterable[str],
                 parent_globals: Iterable[str],
+                is_module_scope: bool = False,
             ) -> None:
                 self.locals: set[str] = set(locals)
                 self.used_names: set[str] = set(locals)
@@ -1454,6 +1455,7 @@ class StdGenerator(AstGenerator):
                 self.globals: set[str] = set(globals)
                 self.used_globals: set[str] = set()
                 self.parent_globals = parent_globals
+                self.is_module_scope = is_module_scope
 
             def name_assigned(self, name: str) -> None:
                 self.locals.add(name)
@@ -1555,9 +1557,13 @@ class StdGenerator(AstGenerator):
             def visit_AnnAssign(
                 self, node: ast.AnnAssign
             ) -> ast.AST | list[ast.AST] | None:
-                if isinstance(node.target, ast.Name) and (
-                    node.target.id in self.used_globals
-                    or node.target.id in self.used_nonlocals
+                if (
+                    not self.is_module_scope
+                    and isinstance(node.target, ast.Name)
+                    and (
+                        node.target.id in self.used_globals
+                        or node.target.id in self.used_nonlocals
+                    )
                 ):
                     if node.value:
                         return self.generic_visit(
@@ -1762,7 +1768,7 @@ class StdGenerator(AstGenerator):
 
                 return node
 
-        fixer = NonLocalFixer([], [], [], [], [])
+        fixer = NonLocalFixer([], [], [], [], [], is_module_scope=True)
         node = fixer.visit(node)
 
         node = FunctionTransformer([], [], [], []).visit(node)

@@ -342,7 +342,7 @@ class AstGenerator:
             else:
                 gen()
 
-            value = getattr(new_result, attr_name)
+            value = getattr(new_result, attr_name, None)
             if isinstance(value, list):
                 setattr(
                     new_result,
