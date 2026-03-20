@@ -36,7 +36,6 @@ class Context:
     in_async_code: bool = False
     in_async_context: bool = False
     in_loop: bool = False
-    in_excepthandler: bool = False
     # True inside FunctionDef/AsyncFunctionDef/Lambda body (reset at ClassDef body)
     in_function: bool = False
     # True inside any function/lambda/class body
@@ -57,7 +56,10 @@ class Context:
     in_comprehension: bool = False
     # True inside ClassDef.body but NOT inside a nested function/lambda
     in_class_not_function: bool = False
-    # True inside annotation/type-alias scope (returns, annotations, TypeAlias.value, etc.)
+    # True inside any annotation-like position where yield/await/walrus are forbidden
+    # (3.12+): ClassDef.bases/keywords, FunctionDef/AsyncFunctionDef.returns, arg.annotation,
+    #           TypeAlias.value, TypeVar.bound, and (3.13+) type-param default_value fields.
+    # NOTE: this is a superset of in_annotation_return_scope.
     in_annotation_scope: bool = False
     # True inside AnnAssign.annotation
     in_ann_assign_annotation: bool = False
@@ -69,7 +71,11 @@ class Context:
     in_delete_target: bool = False
     # True inside TypeAlias.value or TypeVar.bound (type parameter scope)
     in_type_scope: bool = False
-    # True inside arg.annotation / FunctionDef.returns / AsyncFunctionDef.returns
+    # True inside arg.annotation, FunctionDef.returns, or AsyncFunctionDef.returns.
+    # These three positions become lazily-evaluated code objects under PEP 649 (3.14+),
+    # which makes := a SyntaxError there even though it is valid in ClassDef.bases etc.
+    # Use this flag when a restriction applies *only* to these PEP-649 positions, not
+    # to the broader set covered by in_annotation_scope.
     in_annotation_return_scope: bool = False
     # Nesting depth of FormattedValue.format_spec in the ancestor chain
     fstring_format_depth: int = 0
@@ -226,11 +232,6 @@ class AstGenerator:
     ) -> Context:
         return context
 
-    def context_after(
-        self, context: Context, node: NodeRef, attr: str, index: int | None
-    ) -> None:
-        pass
-
     def generate(self, ast_type_name: str, depth: int = 0) -> ast.AST:
         result = None
         context = Context()
@@ -360,8 +361,6 @@ class AstGenerator:
                         value, new_node.new_child(value, attr_name), child_context
                     ),
                 )
-
-            self.context_after(child_context, new_node, attr_name, None)
 
     def generate_UnionNodeType(
         self,

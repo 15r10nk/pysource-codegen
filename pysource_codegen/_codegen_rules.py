@@ -154,10 +154,24 @@ class StdGenerator(AstGenerator):
 
     def use(self) -> bool:
         """
-        this function is mocked in test_valid_source to ignore some decisions
-        which are usually made by the algo.
-        The goal is to try to generate some valid source code which would otherwise not be generated,
-        becaus the algo falsely thinks it is invalid.
+        Guards a post-generation fix-up step inside ``fix()``.
+
+        In normal generation this always returns ``True``, so every fix-up runs.
+
+        In the test suite (``test_valid_source``) it is mocked so that it returns
+        ``False`` exactly **once** per generation run, systematically skipping each
+        guarded fix-up in turn.  The resulting AST is then:
+
+        1. Passed to ``compile()`` — if it raises ``SyntaxError`` the skipped fix-up
+           is load-bearing and the variant is discarded.
+        2. If it compiles, ``is_valid_ast()`` (the ``AstChecker``) is run on it.
+           If the checker returns ``False`` on a tree that *does* compile, a bug has
+           been found: the checker wrongly rejects valid Python.  The source is saved
+           as a new ``tests/valid_source_samples/`` entry.
+
+        In other words, ``use()`` turns every fix-up branch into a probe: skipping it
+        once explores the space of "unfixed but still valid" ASTs that the normal
+        generator would never produce, hunting for checker blind spots.
         """
         return True
 
@@ -581,10 +595,14 @@ class StdGenerator(AstGenerator):
             # SyntaxError: assignment expression within a comprehension cannot be used in a class body
             raise Invalid
         if py312plus and context.in_type_scope:
-            # todo this should only be invalid in type scopes (when the class/def has type parameters)
-            # and only for async comprehensions
+            # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
+            # default_value): the lazy evaluation context has no enclosing function
+            # frame to assign the walrus target into.
             raise Invalid
         if sys.version_info >= (3, 14) and context.in_annotation_return_scope:
+            # PEP 649: arg.annotation / returns become lazy code objects in 3.14+, making
+            # := a SyntaxError there.  ClassDef.bases/keywords are still eager, so walrus
+            # is allowed in those positions — use the narrow flag, not in_annotation_scope.
             raise Invalid
         return None
 
@@ -744,8 +762,10 @@ class StdGenerator(AstGenerator):
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
         if py312plus and context.in_annotation_scope:
-            # todo this should only be invalid in type scopes (when the class/def has type parameters)
-            # and only for async comprehensions
+            # SyntaxError: annotation positions (returns, arg annotations,
+            # TypeAlias.value, ClassDef.bases/keywords, type-param defaults) are
+            # either eagerly evaluated outside any generator context, or inside a
+            # type scope — neither allows a yield expression.
             raise Invalid
         return None
 
@@ -767,8 +787,8 @@ class StdGenerator(AstGenerator):
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
         if py312plus and context.in_annotation_scope:
-            # todo this should only be invalid in type scopes (when the class/def has type parameters)
-            # and only for async comprehensions
+            # SyntaxError: same reasoning as probability_try_Yield — annotation
+            # positions have no generator context that yield from could delegate to.
             raise Invalid
         return None
 
@@ -827,12 +847,6 @@ class StdGenerator(AstGenerator):
             "ClassDef",
         ):
             ctx.in_loop = False
-
-        # --- in_excepthandler ---
-        if node_type == "ExceptHandler":
-            ctx.in_excepthandler = True
-        elif is_function_def:
-            ctx.in_excepthandler = False
 
         # --- in_function: inside FunctionDef/AsyncFunctionDef/Lambda body, reset at ClassDef.body ---
         if attr == "body" and is_function_def:
@@ -896,7 +910,11 @@ class StdGenerator(AstGenerator):
         elif attr == "body" and is_function_def:
             ctx.in_class_not_function = False
 
-        # --- in_annotation_scope: annotation/type-alias positions where yield/await/walrus forbidden ---
+        # --- in_annotation_scope: broad set of annotation-like positions where yield/await/walrus are
+        #     forbidden (3.12+): ClassDef.bases/keywords, returns, arg.annotation, TypeAlias.value,
+        #     TypeVar.bound, and type-param default_value (3.13+).  This is a superset of
+        #     in_annotation_return_scope — prefer the narrower flag when the restriction only applies
+        #     to the three PEP-649 lazy positions (arg.annotation, returns). ---
         if (node_type, attr) in (
             ("ClassDef", "bases"),
             ("ClassDef", "keywords"),
@@ -966,7 +984,11 @@ class StdGenerator(AstGenerator):
         ):
             ctx.in_type_scope = False
 
-        # --- in_annotation_return_scope: inside arg.annotation / FunctionDef.returns / AsyncFunctionDef.returns ---
+        # --- in_annotation_return_scope: subset of in_annotation_scope covering only the three positions
+        #     that PEP 649 (3.14+) makes lazily-evaluated code objects: arg.annotation,
+        #     FunctionDef.returns, AsyncFunctionDef.returns.  The walrus operator := becomes a
+        #     SyntaxError specifically in these positions in 3.14+, while it is still valid in
+        #     ClassDef.bases/keywords (eagerly evaluated) even though those are also annotation scopes. ---
         if (node_type, attr) in (
             ("arg", "annotation"),
             ("FunctionDef", "returns"),
