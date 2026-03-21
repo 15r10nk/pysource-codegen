@@ -56,10 +56,12 @@ class Context:
     in_comprehension: bool = False
     # True inside ClassDef.body but NOT inside a nested function/lambda
     in_class_not_function: bool = False
-    # True inside any annotation-like position where yield/await/walrus are forbidden
-    # (3.12+): ClassDef.bases/keywords, FunctionDef/AsyncFunctionDef.returns, arg.annotation,
-    #           TypeAlias.value, TypeVar.bound, and (3.13+) type-param default_value fields.
-    # NOTE: this is a superset of in_annotation_return_scope.
+    # True inside any annotation-like position: ClassDef.bases/keywords,
+    # FunctionDef/AsyncFunctionDef.returns, arg.annotation, TypeAlias.value,
+    # TypeVar.bound, and (3.13+) type-param default_value fields.
+    # NOTE: superset of in_annotation_return_scope and in_type_scope.
+    # Rules should prefer the narrower flags (in_type_scope, in_annotation_return_scope,
+    # in_ann_assign_annotation) rather than this broad flag.
     in_annotation_scope: bool = False
     # True inside AnnAssign.annotation
     in_ann_assign_annotation: bool = False

@@ -380,9 +380,16 @@ class StdGenerator(AstGenerator):
             # code (e.g. ClassDef.bases/keywords) do not apply there, just as
             # they do not apply inside GeneratorExp.elt (see context_before).
             return None
-        if py312plus and (
-            context.in_ann_assign_annotation or context.in_annotation_scope
+        if py312plus and context.in_type_scope:
+            # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
+            # default_value): no async function frame exists to await in.
+            raise Invalid
+        if py314plus and (
+            context.in_annotation_return_scope or context.in_ann_assign_annotation
         ):
+            # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
+            # lazy code objects, making await a SyntaxError there.
+            # ClassDef.bases/keywords are still eagerly evaluated, so await is allowed.
             raise Invalid
         return None
 
@@ -611,10 +618,12 @@ class StdGenerator(AstGenerator):
             # default_value): the lazy evaluation context has no enclosing function
             # frame to assign the walrus target into.
             raise Invalid
-        if sys.version_info >= (3, 14) and context.in_annotation_return_scope:
-            # PEP 649: arg.annotation / returns become lazy code objects in 3.14+, making
-            # := a SyntaxError there.  ClassDef.bases/keywords are still eager, so walrus
-            # is allowed in those positions — use the narrow flag, not in_annotation_scope.
+        if py314plus and (
+            context.in_annotation_return_scope or context.in_ann_assign_annotation
+        ):
+            # PEP 649: arg.annotation / returns / AnnAssign.annotation become lazy code
+            # objects in 3.14+, making := a SyntaxError there.
+            # ClassDef.bases/keywords are still eager, so walrus is allowed there.
             raise Invalid
         return None
 
@@ -791,11 +800,16 @@ class StdGenerator(AstGenerator):
         if context.in_comprehension:
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
-        if py312plus and context.in_annotation_scope:
-            # SyntaxError: annotation positions (returns, arg annotations,
-            # TypeAlias.value, ClassDef.bases/keywords, type-param defaults) are
-            # either eagerly evaluated outside any generator context, or inside a
-            # type scope — neither allows a yield expression.
+        if py312plus and context.in_type_scope:
+            # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
+            # default_value): no generator function frame exists to yield from.
+            raise Invalid
+        if py314plus and (
+            context.in_annotation_return_scope or context.in_ann_assign_annotation
+        ):
+            # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
+            # lazy code objects, making yield a SyntaxError there.
+            # ClassDef.bases/keywords are still eagerly evaluated, so yield is allowed.
             raise Invalid
         return None
 
@@ -816,9 +830,16 @@ class StdGenerator(AstGenerator):
         if context.in_comprehension:
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
-        if py312plus and context.in_annotation_scope:
-            # SyntaxError: same reasoning as probability_try_Yield — annotation
-            # positions have no generator context that yield from could delegate to.
+        if py312plus and context.in_type_scope:
+            # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
+            # default_value): no generator function frame exists for yield from.
+            raise Invalid
+        if py314plus and (
+            context.in_annotation_return_scope or context.in_ann_assign_annotation
+        ):
+            # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
+            # lazy code objects, making yield from a SyntaxError there.
+            # ClassDef.bases/keywords are still eagerly evaluated, so yield from is allowed.
             raise Invalid
         return None
 
@@ -942,11 +963,11 @@ class StdGenerator(AstGenerator):
         elif attr == "body" and is_function_def:
             ctx.in_class_not_function = False
 
-        # --- in_annotation_scope: broad set of annotation-like positions where yield/await/walrus are
-        #     forbidden (3.12+): ClassDef.bases/keywords, returns, arg.annotation, TypeAlias.value,
-        #     TypeVar.bound, and type-param default_value (3.13+).  This is a superset of
-        #     in_annotation_return_scope — prefer the narrower flag when the restriction only applies
-        #     to the three PEP-649 lazy positions (arg.annotation, returns). ---
+        # --- in_annotation_scope: broad set of annotation-like positions —
+        #     ClassDef.bases/keywords, returns, arg.annotation, TypeAlias.value,
+        #     TypeVar.bound, and type-param default_value (3.13+).
+        #     This is a superset of in_annotation_return_scope and in_type_scope.
+        #     Rules should prefer the narrower flags rather than this broad flag. ---
         if (node_type, attr) in (
             ("ClassDef", "bases"),
             ("ClassDef", "keywords"),
