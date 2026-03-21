@@ -374,6 +374,11 @@ class StdGenerator(AstGenerator):
             )
             if not in_genexp_inner:
                 raise Invalid
+            # in_genexp_inner positions are inside the generator's own implicit
+            # function scope.  Annotation-scope restrictions from the surrounding
+            # code (e.g. ClassDef.bases/keywords) do not apply there, just as
+            # they do not apply inside GeneratorExp.elt (see context_before).
+            return None
         if py312plus and (
             context.in_ann_assign_annotation or context.in_annotation_scope
         ):
@@ -944,21 +949,31 @@ class StdGenerator(AstGenerator):
             ("ParamSpec", "default_value"),
         ):
             ctx.in_annotation_scope = True
-        elif attr == "body" and node_type in (
-            "FunctionDef",
-            "AsyncFunctionDef",
-            "Lambda",
-            "ClassDef",
+        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+            attr == "body"
+            and node_type
+            in (
+                "FunctionDef",
+                "AsyncFunctionDef",
+                "Lambda",
+                "ClassDef",
+            )
         ):
+            # GeneratorExp creates its own implicit function scope, so annotation-scope
+            # restrictions from the surrounding code do not apply inside its body.
             ctx.in_annotation_scope = False
 
         # --- in_ann_assign_annotation: inside AnnAssign.annotation ---
         if node_type == "AnnAssign" and attr == "annotation":
             ctx.in_ann_assign_annotation = True
-        elif attr == "body" and node_type in (
-            "FunctionDef",
-            "AsyncFunctionDef",
-            "Lambda",
+        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+            attr == "body"
+            and node_type
+            in (
+                "FunctionDef",
+                "AsyncFunctionDef",
+                "Lambda",
+            )
         ):
             ctx.in_ann_assign_annotation = False
 
@@ -1010,11 +1025,15 @@ class StdGenerator(AstGenerator):
             ("AsyncFunctionDef", "returns"),
         ):
             ctx.in_annotation_return_scope = True
-        elif attr == "body" and node_type in (
-            "FunctionDef",
-            "AsyncFunctionDef",
-            "Lambda",
-            "ClassDef",
+        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+            attr == "body"
+            and node_type
+            in (
+                "FunctionDef",
+                "AsyncFunctionDef",
+                "Lambda",
+                "ClassDef",
+            )
         ):
             ctx.in_annotation_return_scope = False
 
