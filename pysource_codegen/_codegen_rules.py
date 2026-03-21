@@ -1216,14 +1216,20 @@ class StdGenerator(AstGenerator):
             )
         ):
             # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
+            # Guard against None targets/iters: these can occur when an
+            # invalid_option path generates a comprehension in a context where
+            # all store-target options are simultaneously forbidden (e.g. inside
+            # MatchValue + UnaryOp), leaving the field unset (None).
             names = {
                 n.id
                 for c in node.generators
+                if c.target is not None
                 for n in ast.walk(c.target)
                 if isinstance(n, ast.Name)
             } | {
                 n.id
                 for c in node.generators
+                if c.iter is not None
                 for n in ast.walk(c.iter)
                 if isinstance(n, ast.Name)
             }
