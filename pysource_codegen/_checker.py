@@ -28,6 +28,13 @@ class AstChecker(StdGenerator):
 
         target_parent = parent_node.relocate(self.target)
 
+        # If the target has None at this position, no concrete type can match.
+        # This happens when a required field (qty='') has None in the target tree,
+        # which is always an invalid AST (generate_UnionNodeType would silently
+        # leave the field as None, causing a false-positive valid result).
+        if target_parent.node is None:
+            raise _InvalidTree()
+
         equal_current_type = type(target_parent.node).__name__ == type_name
 
         if equal_current_type and original <= 0:
