@@ -831,14 +831,13 @@ class StdGenerator(AstGenerator):
             ("GeneratorExp", "elt"),
         ):
             ctx.in_async_code = True
-        elif (
-            ctx.in_async_code
-            and attr == "body"
-            and node_type
+        elif ctx.in_async_code and (
+            (attr == "body" and node_type in ("FunctionDef", "Lambda", "ClassDef"))
+            or (node_type, attr)
             in (
-                "FunctionDef",
-                "Lambda",
-                "ClassDef",
+                ("TypeVar", "default_value"),
+                ("TypeVarTuple", "default_value"),
+                ("ParamSpec", "default_value"),
             )
         ):
             ctx.in_async_code = False
@@ -852,6 +851,9 @@ class StdGenerator(AstGenerator):
             ("AsyncFunctionDef", "returns"),
             ("arg", "annotation"),
             ("TypeVar", "bound"),
+            ("TypeVar", "default_value"),
+            ("TypeVarTuple", "default_value"),
+            ("ParamSpec", "default_value"),
         ):
             ctx.in_async_context = False
         elif not py311plus and node_type in comprehensions:
