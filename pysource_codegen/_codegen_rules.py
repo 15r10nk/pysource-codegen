@@ -717,12 +717,13 @@ class StdGenerator(AstGenerator):
         # py3.13+: TypeVarTuple default_value is a Starred expression: def f[*Ts = *int]()
         if py313plus and p_info == ("TypeVarTuple", "default_value"):
             return None
-        # py3.14+: starred target in comprehension is allowed in annotation scope
-        # (e.g. `(x): {0: 0 for *y in z}`) but not in regular expression context.
+        # py3.14+: starred target in comprehension is allowed only in AnnAssign.annotation
+        # (e.g. `(x): {0: 0 for *y in z}`). TypeAlias.value and other annotation-like
+        # scopes do NOT allow it.
         if (
             py314plus
             and p_info == ("comprehension", "target")
-            and (context.in_annotation_scope or context.in_ann_assign_annotation)
+            and context.in_ann_assign_annotation
         ):
             return None
         # py3.15+: starred expressions are allowed as comprehension elements
