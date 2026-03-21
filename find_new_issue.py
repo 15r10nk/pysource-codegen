@@ -34,7 +34,6 @@ if __name__ == "__main__":
     kinds = sorted(generators)
 
     def try_seed(i: int) -> tuple[str, str] | None:
-        print("try seed =", i)
         if found.is_set():
             return None
         kind = kinds[i % len(kinds)]

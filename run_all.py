@@ -152,4 +152,10 @@ for i in range(max_rows):
 console = Console()
 console.print(table)
 
-exit(1 if any(v != 0 for v in results.values()) else 0)
+error_count = sum(v != 0 for v in results.values())
+
+if error_count:
+    print(f"FAIL: {error_count} configurations failed")
+    print(f"FAIL: {sorted(k for k,v in results.items()if v !=0)}")
+
+exit(1 if error_count else 0)
