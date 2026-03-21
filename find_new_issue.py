@@ -1,9 +1,12 @@
 import argparse
+import hashlib
+import itertools
 import os
 import threading
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
-from random import randint
+from pathlib import Path
+from random import randrange
 
 from tests.test_invalid_ast import generate_invalid_ast
 from tests.test_valid_source import generate_valid_source
@@ -14,28 +17,70 @@ if __name__ == "__main__":
     parser.add_argument(
         "--workers", type=int, default=os.cpu_count(), help="Number of parallel workers"
     )
+    parser.add_argument(
+        "--num-seeds",
+        type=int,
+        default=None,
+        help="Total number of seeds to test (default: unlimited)",
+    )
     args = parser.parse_args()
+
+    found = threading.Event()
+
+    generators = {
+        "invalid_ast": generate_invalid_ast,
+        "valid_source": generate_valid_source,
+    }
+    kinds = sorted(generators)
+
+    def try_seed(i: int) -> tuple[str, str] | None:
+        if found.is_set():
+            return None
+        kind = kinds[i % len(kinds)]
+        result = generators[kind](i)
+        if (
+            result and result is not True
+        ):  # True = early-exit (generation bug), no sample
+            found.set()
+            return (kind, result)
+        return None
 
     if args.seed is not None:
         print(f"Testing seed {args.seed}")
-        if args.seed % 2 == 0:
-            generate_invalid_ast(args.seed)
-        else:
-            generate_valid_source(args.seed)
+        result = try_seed(args.seed)
+        if result:
+            kind, content = result
+            sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
+            name = sample_dir / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
+            name.write_text(content)
+            print(f"Saved: {name}")
     else:
-        found = threading.Event()
 
-        def try_seed():
-            while not found.is_set():
-                i = randint(0, 10000000000)
-                if generate_invalid_ast(i) if i % 2 == 0 else generate_valid_source(i):
-                    found.set()
-                    return i
+        def random_seeds():
+            while True:
+                yield randrange(10_000_000_000)
 
         with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = [executor.submit(try_seed) for _ in range(args.workers)]
-            for future in as_completed(futures):
-                result = future.result()
-                if result is not None:
-                    print(f"Found seed: {result}")
-                    os._exit(0)
+            seed_stream = itertools.islice(random_seeds(), args.num_seeds)
+            futures = {
+                executor.submit(try_seed, s)
+                for s in itertools.islice(seed_stream, args.workers)
+            }
+            try:
+                for future in as_completed(futures):
+                    if result := future.result():
+                        kind, content = result
+                        sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
+                        name = (
+                            sample_dir
+                            / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
+                        )
+                        name.write_text(content)
+                        print(f"Saved: {name}")
+                        os._exit(0)
+                    if (s := next(seed_stream, None)) is not None:
+                        futures.add(executor.submit(try_seed, s))
+            except KeyboardInterrupt:
+                found.set()  # signal workers to stop early
+                print("\nInterrupted.")
+                os._exit(1)

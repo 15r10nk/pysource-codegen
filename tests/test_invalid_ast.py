@@ -1,5 +1,4 @@
 import ast
-import hashlib
 import sys
 import textwrap
 import warnings
@@ -143,9 +142,7 @@ def generate_invalid_ast(seed):
             info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
 
             print(info)
-            name = sample_dir / f"{hashlib.sha256(info.encode('utf-8')).hexdigest()}.py"
-            name.write_text(info)
-            return True
+            return info
         else:
             assert False
     return False
