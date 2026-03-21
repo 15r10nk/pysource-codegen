@@ -92,7 +92,6 @@ def x_test_example():
 
 
 def generate_invalid_ast(seed):
-    print("seed =", seed)
 
     tree = generate_ast(seed, depth_limit=9)
     try:

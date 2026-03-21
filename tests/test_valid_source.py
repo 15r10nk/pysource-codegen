@@ -82,7 +82,6 @@ def generate_valid_source(seed: int) -> str | bool:
     The use() hook controls if a specific restriction in the code generation should be applied
 
     """
-    print("seed=", seed)
 
     ignore_index: int = 0
     ignored_something: bool = True
@@ -112,18 +111,17 @@ def generate_valid_source(seed: int) -> str | bool:
 
         max_index = max(max_index, current_index)
 
+        ignore_index += 1
+        # print(f"{seed} {ignore_index} of {max_index} ignored? {ignored_something}")
+
         try:
             code = unparse(tree)
         except Exception as e:
-            print(repr(e))
+            # print(repr(e))
             continue
-
-        # print(f"{seed} {ignore_index} of {max_index} ignored? {ignored_something}")
 
         if result := minimize_if_valid(code):
             return result
-
-        ignore_index += 1
 
     return False
 
