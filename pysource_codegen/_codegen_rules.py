@@ -1146,9 +1146,11 @@ class StdGenerator(AstGenerator):
         ):
             node.simple = 0
 
-        if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple == 1):
+        if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple != 0):
             # SyntaxError: starred comprehension target in AnnAssign.annotation is
             # only valid when simple=0 (parenthesised target).  Strip any *x → x.
+            # CPython treats any non-zero simple as "simple" (bare-name style),
+            # so simple=2 etc. also trigger the error.
             for n in ast.walk(node.annotation):
                 if isinstance(n, ast.comprehension) and isinstance(
                     n.target, ast.Starred
