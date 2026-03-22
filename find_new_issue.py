@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import itertools
 import os
+import subprocess
 import threading
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
@@ -33,6 +34,13 @@ if __name__ == "__main__":
     }
     kinds = sorted(generators)
 
+    def save_sample(kind: str, content: str) -> None:
+        sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
+        name = sample_dir / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
+        name.write_text(content)
+        subprocess.run(["git", "add", str(name)], check=True)
+        print(f"Saved: {name}")
+
     def try_seed(i: int) -> tuple[str, str] | None:
         if found.is_set():
             return None
@@ -50,10 +58,7 @@ if __name__ == "__main__":
         result = try_seed(args.seed)
         if result:
             kind, content = result
-            sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
-            name = sample_dir / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
-            name.write_text(content)
-            print(f"Saved: {name}")
+            save_sample(kind, content)
     else:
 
         def random_seeds():
@@ -70,13 +75,7 @@ if __name__ == "__main__":
                 for future in as_completed(futures):
                     if result := future.result():
                         kind, content = result
-                        sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
-                        name = (
-                            sample_dir
-                            / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
-                        )
-                        name.write_text(content)
-                        print(f"Saved: {name}")
+                        save_sample(kind, content)
                         os._exit(0)
                     if (s := next(seed_stream, None)) is not None:
                         futures.add(executor.submit(try_seed, s))
