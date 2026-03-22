@@ -726,9 +726,9 @@ class StdGenerator(AstGenerator):
         # py3.13+: TypeVarTuple default_value is a Starred expression: def f[*Ts = *int]()
         if py313plus and p_info == ("TypeVarTuple", "default_value"):
             return None
-        # py3.14+: starred target in comprehension is allowed only in AnnAssign.annotation
-        # (e.g. `(x): {0: 0 for *y in z}`). TypeAlias.value and other annotation-like
-        # scopes do NOT allow it.
+        # py3.14+: starred target in comprehension is allowed in AnnAssign.annotation
+        # when simple=0 (e.g. `(x): {0: 0 for *y in z}`). When simple=1 the compiler
+        # rejects it; fix() cleans up any Starred comprehension targets in that case.
         if (
             py314plus
             and p_info == ("comprehension", "target")
@@ -1039,11 +1039,15 @@ class StdGenerator(AstGenerator):
             ("ParamSpec", "default_value"),
         ):
             ctx.in_type_scope = True
-        elif attr == "body" and node_type in (
-            "FunctionDef",
-            "AsyncFunctionDef",
-            "Lambda",
-            "ClassDef",
+        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+            attr == "body"
+            and node_type
+            in (
+                "FunctionDef",
+                "AsyncFunctionDef",
+                "Lambda",
+                "ClassDef",
+            )
         ):
             ctx.in_type_scope = False
 
@@ -1141,6 +1145,15 @@ class StdGenerator(AstGenerator):
             isinstance(node, ast.AnnAssign) and not isinstance(node.target, ast.Name)
         ):
             node.simple = 0
+
+        if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple == 1):
+            # SyntaxError: starred comprehension target in AnnAssign.annotation is
+            # only valid when simple=0 (parenthesised target).  Strip any *x → x.
+            for n in ast.walk(node.annotation):
+                if isinstance(n, ast.comprehension) and isinstance(
+                    n.target, ast.Starred
+                ):
+                    n.target = n.target.value  # type: ignore[assignment]
 
         if isinstance(node, ast.Constant):
             # TODO: what is Constant.kind
@@ -1429,6 +1442,13 @@ class StdGenerator(AstGenerator):
 
                     def visit_YieldFrom(
                         self, node: ast.YieldFrom
+                    ) -> ast.AST | list[ast.AST] | None:
+                        if not use():
+                            return self.generic_visit(node)
+                        return self.visit(node.value)
+
+                    def visit_Await(
+                        self, node: ast.Await
                     ) -> ast.AST | list[ast.AST] | None:
                         if not use():
                             return self.generic_visit(node)
