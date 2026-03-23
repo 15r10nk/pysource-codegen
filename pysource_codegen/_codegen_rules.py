@@ -735,6 +735,15 @@ class StdGenerator(AstGenerator):
             and context.in_ann_assign_annotation
         ):
             return None
+        # py3.14+: starred value in Interpolation is allowed in AnnAssign.annotation
+        # when simple=0 (e.g. `(x): t'{*0}'`). When simple=1 the compiler rejects it;
+        # fix() cleans up any Starred Interpolation.value in that case.
+        if (
+            py314plus
+            and p_info == ("Interpolation", "value")
+            and context.in_ann_assign_annotation
+        ):
+            return None
         # py3.15+: starred expressions are allowed as comprehension elements
         # (e.g. {*x for x in y}, [*x for x in y], (*x for x in y)) — but NOT
         # in DictComp.key or DictComp.value.
@@ -1151,8 +1160,9 @@ class StdGenerator(AstGenerator):
             node.simple = 0
 
         if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple != 0):
-            # SyntaxError: starred comprehension target in AnnAssign.annotation is
-            # only valid when simple=0 (parenthesised target).  Strip any *x → x.
+            # SyntaxError: starred comprehension target / starred Interpolation.value
+            # in AnnAssign.annotation is only valid when simple=0 (parenthesised target).
+            # Strip any *x → x.
             # CPython treats any non-zero simple as "simple" (bare-name style),
             # so simple=2 etc. also trigger the error.
             for n in ast.walk(node.annotation):
@@ -1160,6 +1170,10 @@ class StdGenerator(AstGenerator):
                     n.target, ast.Starred
                 ):
                     n.target = n.target.value  # type: ignore[assignment]
+                if isinstance(n, ast.Interpolation) and isinstance(  # type: ignore[attr-defined]
+                    n.value, ast.Starred
+                ):
+                    n.value = n.value.value  # type: ignore[union-attr]
 
         if isinstance(node, ast.Constant):
             # TODO: what is Constant.kind
@@ -1515,13 +1529,6 @@ class StdGenerator(AstGenerator):
                         no_default_seen = True
                     elif self.use(no_default_seen):
                         child.default_value = None
-
-        if sys.version_info >= (3, 14):
-            if self.use(
-                isinstance(node, ast.Interpolation)
-                and isinstance(node.value, ast.Constant)
-            ):
-                node.value.value = str(node.value.value)
 
         return node
 
