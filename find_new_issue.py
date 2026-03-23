@@ -1,16 +1,54 @@
 import argparse
 import hashlib
 import itertools
+import multiprocessing.synchronize
 import os
 import subprocess
-import threading
-from concurrent.futures import as_completed
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import wait
 from pathlib import Path
 from random import randrange
 
+from rich.progress import BarColumn
+from rich.progress import MofNCompleteColumn
+from rich.progress import Progress
+from rich.progress import ProgressColumn
+from rich.progress import SpinnerColumn
+from rich.progress import TaskProgressColumn
+from rich.progress import TextColumn
+from rich.progress import TimeRemainingColumn
+from rich.text import Text
+
 from tests.test_invalid_ast import generate_invalid_ast
 from tests.test_valid_source import generate_valid_source
+
+# Module-level so worker functions are picklable by ProcessPoolExecutor.
+generators = {
+    "invalid_ast": generate_invalid_ast,
+    "valid_source": generate_valid_source,
+}
+kinds = sorted(generators)
+
+# Initialised in the main process; replaced in each worker via _worker_init.
+_found: multiprocessing.synchronize.Event = multiprocessing.Event()
+
+
+def _worker_init(event: multiprocessing.synchronize.Event) -> None:
+    global _found
+    _found = event
+
+
+def try_seed(i: int) -> tuple[str, str] | None:
+    if _found.is_set():
+        return None
+    kind = kinds[i % len(kinds)]
+    result = generators[kind](i)
+    if result and result is not True:  # True = early-exit (generation bug), no sample
+        _found.set()
+        return (kind, result)
+    return None
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -26,32 +64,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    found = threading.Event()
-
-    generators = {
-        "invalid_ast": generate_invalid_ast,
-        "valid_source": generate_valid_source,
-    }
-    kinds = sorted(generators)
-
     def save_sample(kind: str, content: str) -> None:
         sample_dir = Path(__file__).parent / "tests" / f"{kind}_samples"
         name = sample_dir / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
         name.write_text(content)
         subprocess.run(["git", "add", str(name)], check=True)
         print(f"Saved: {name}")
-
-    def try_seed(i: int) -> tuple[str, str] | None:
-        if found.is_set():
-            return None
-        kind = kinds[i % len(kinds)]
-        result = generators[kind](i)
-        if (
-            result and result is not True
-        ):  # True = early-exit (generation bug), no sample
-            found.set()
-            return (kind, result)
-        return None
 
     if args.seed is not None:
         print(f"Testing seed {args.seed}")
@@ -61,25 +79,53 @@ if __name__ == "__main__":
             save_sample(kind, content)
     else:
 
+        class SeedsPerSecColumn(ProgressColumn):
+            def render(self, task) -> Text:  # type: ignore[override]
+                speed = task.speed
+                if speed is None:
+                    return Text("? seeds/s", style="green")
+                return Text(f"{speed:.0f} seeds/s", style="green")
+
         def random_seeds():
             while True:
                 yield randrange(10_000_000_000)
 
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            seed_stream = itertools.islice(random_seeds(), args.num_seeds)
-            futures = {
-                executor.submit(try_seed, s)
-                for s in itertools.islice(seed_stream, args.workers)
-            }
-            try:
-                for future in as_completed(futures):
-                    if result := future.result():
-                        kind, content = result
-                        save_sample(kind, content)
-                        os._exit(0)
-                    if (s := next(seed_stream, None)) is not None:
-                        futures.add(executor.submit(try_seed, s))
-            except KeyboardInterrupt:
-                found.set()  # signal workers to stop early
-                print("\nInterrupted.")
-                os._exit(1)
+        found = multiprocessing.Event()
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]find-new-issue"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            SeedsPerSecColumn(),
+        ) as progress:
+            task = progress.add_task("", total=args.num_seeds)
+
+            with ProcessPoolExecutor(
+                max_workers=args.workers,
+                initializer=_worker_init,
+                initargs=(found,),
+            ) as executor:
+                seed_stream = itertools.islice(random_seeds(), args.num_seeds)
+                pending = {
+                    executor.submit(try_seed, s)
+                    for s in itertools.islice(seed_stream, args.workers)
+                }
+                try:
+                    while pending:
+                        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                        for future in done:
+                            progress.advance(task)
+                            if result := future.result():
+                                kind, content = result
+                                save_sample(kind, content)
+                                os._exit(0)
+                            if (s := next(seed_stream, None)) is not None:
+                                pending.add(executor.submit(try_seed, s))
+                except KeyboardInterrupt:
+                    found.set()  # signal workers to stop early
+                    progress.stop()
+                    print("\nInterrupted.")
+                    os._exit(1)

@@ -108,3 +108,6 @@ create=[
 
 [project.scripts]
 pysource-codegen = "pysource_codegen.__main__:run"
+
+[tool.black]
+exclude = "tests/.*_samples"
