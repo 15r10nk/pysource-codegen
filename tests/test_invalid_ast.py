@@ -38,9 +38,10 @@ class TestInvalidAst(TestBase):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", SyntaxWarning)
+                ast.fix_missing_locations(tree)
                 source = unparse(tree)
                 compile(source, "<file>", "exec")
-                compile(ast.fix_missing_locations(tree), "<file>", "exec")
+                compile(tree, "<file>", "exec")
         except Exception as e:
             self.addDetail("exception during `compile(ast.unparse(tree))`:\n" + str(e))
             return False

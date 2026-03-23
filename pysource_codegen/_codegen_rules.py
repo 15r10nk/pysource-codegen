@@ -887,6 +887,10 @@ class StdGenerator(AstGenerator):
             ("ParamSpec", "default_value"),
         ):
             ctx.in_async_context = False
+        elif py314plus and (node_type, attr) == ("AnnAssign", "annotation"):
+            # PEP 649 (3.14+): AnnAssign.annotation is a lazy code object,
+            # not evaluated in the surrounding async scope.
+            ctx.in_async_context = False
         elif not py311plus and node_type in comprehensions:
             ctx.in_async_context = False
 
@@ -1699,10 +1703,12 @@ class StdGenerator(AstGenerator):
                     *node.args.defaults,
                     *node.args.kw_defaults,
                     *node.decorator_list,
-                    node.returns,
                 ]
-
-                all_nodes += [arg.annotation for arg in arguments(node)]
+                if not py314plus:
+                    # On 3.14+, returns and arg.annotation are lazy code objects
+                    # (PEP 649): names there are NOT "used" for global/nonlocal.
+                    all_nodes.append(node.returns)
+                    all_nodes += [arg.annotation for arg in arguments(node)]
 
                 for default in all_nodes:
                     if default is not None:
@@ -1717,10 +1723,12 @@ class StdGenerator(AstGenerator):
                     *node.args.defaults,
                     *node.args.kw_defaults,
                     *node.decorator_list,
-                    node.returns,
                 ]
-
-                all_nodes += [arg.annotation for arg in arguments(node)]
+                if not py314plus:
+                    # On 3.14+, returns and arg.annotation are lazy code objects
+                    # (PEP 649): names there are NOT "used" for global/nonlocal.
+                    all_nodes.append(node.returns)
+                    all_nodes += [arg.annotation for arg in arguments(node)]
 
                 for default in all_nodes:
                     if default is not None:
