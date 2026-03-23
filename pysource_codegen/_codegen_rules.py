@@ -613,10 +613,15 @@ class StdGenerator(AstGenerator):
         if context.in_comprehension and context.in_class_not_function:
             # SyntaxError: assignment expression within a comprehension cannot be used in a class body
             raise Invalid
-        if py312plus and context.in_type_scope:
+        if py312plus and (
+            context.in_type_scope or context.in_comprehension_in_type_scope
+        ):
             # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
             # default_value): the lazy evaluation context has no enclosing function
             # frame to assign the walrus target into.
+            # Also forbidden when the walrus is inside a comprehension that is itself
+            # nested in a type scope: walrus escapes the comprehension boundary, so it
+            # would still target the type scope (which has no function frame).
             raise Invalid
         if py314plus and (
             context.in_annotation_return_scope or context.in_ann_assign_annotation
@@ -1063,6 +1068,20 @@ class StdGenerator(AstGenerator):
             )
         ):
             ctx.in_type_scope = False
+
+        # --- in_comprehension_in_type_scope: inside a comprehension that is nested inside a
+        #     type scope (without an intervening function/class boundary).
+        #     Walrus (:=) escapes comprehension scopes to the nearest enclosing non-comprehension
+        #     scope; if that scope is a type scope (no function frame), it is a SyntaxError.
+        #     Unlike in_type_scope, this flag is NOT cleared when entering GeneratorExp.elt,
+        #     because walrus would still try to escape to the outer type scope.
+        #     It IS cleared at function/lambda/class body boundaries. ---
+        if node_type in comprehensions and (
+            context.in_type_scope or context.in_comprehension_in_type_scope
+        ):
+            ctx.in_comprehension_in_type_scope = True
+        elif is_function_def or node_type == "ClassDef":
+            ctx.in_comprehension_in_type_scope = False
 
         # --- in_annotation_return_scope: subset of in_annotation_scope covering only the three positions
         #     that PEP 649 (3.14+) makes lazily-evaluated code objects: arg.annotation,

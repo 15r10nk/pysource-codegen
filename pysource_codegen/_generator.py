@@ -73,6 +73,11 @@ class Context:
     in_delete_target: bool = False
     # True inside TypeAlias.value or TypeVar.bound (type parameter scope)
     in_type_scope: bool = False
+    # True inside a comprehension whose outer non-function scope is a type scope.
+    # Walrus (:=) escapes comprehension scopes, so it would still target the type scope
+    # (which has no enclosing function frame) → SyntaxError.
+    # Cleared at function/lambda/class body boundaries (where walrus assigns locally).
+    in_comprehension_in_type_scope: bool = False
     # True inside arg.annotation, FunctionDef.returns, or AsyncFunctionDef.returns.
     # These three positions become lazily-evaluated code objects under PEP 649 (3.14+),
     # which makes := a SyntaxError there even though it is valid in ClassDef.bases etc.
