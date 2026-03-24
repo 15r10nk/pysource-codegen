@@ -1141,6 +1141,12 @@ class StdGenerator(AstGenerator):
         )
         p_info = (p_type, p_attr)
 
+        # type_comment fields are not preserved by ast.unparse (they are silently
+        # dropped).  Any non-None value therefore makes the AST not round-trip
+        # through unparse → parse, so we always force them to None.
+        if hasattr(node, "type_comment"):
+            setattr(node, "type_comment", None)
+
         if isinstance(node, ast.ImportFrom):
             if self.use(not py310plus and node.level is None):
                 node.level = 0
@@ -1946,7 +1952,9 @@ class StdGenerator(AstGenerator):
             return 1
         if node_type == "ExtSlice" and attr_name == "dims":
             return 1
-        if sys.version_info < (3, 9, 3) and node_type == "Set" and attr_name == "elts":
+        if node_type == "Set" and attr_name == "elts":
+            # An empty set literal does not exist in Python syntax: {} parses as a
+            # dict, so Set.elts must always have at least one element.
             return 1
         if node_type == "Compare" and attr_name in ("ops", "comparators"):
             return 1

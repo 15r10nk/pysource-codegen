@@ -9,7 +9,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / 
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
-from pysource_codegen._utils import ast_dump
+from pysource_codegen._utils import ast_dump, equal_ast
 from pysource_minimize._minimize import minimize_ast
 from .TestBase import TestBase
 
@@ -28,6 +28,13 @@ class TestInvalidAst(TestBase):
             self.details.append(" ".join(map(str, text)))
 
     def does_compile(self, tree: ast.Module):
+        ast.fix_missing_locations(tree)
+        try:
+            if not equal_ast(ast.parse(unparse(tree)), tree, self.addDetail):
+                return False
+        except Exception:
+            return False
+
         for node in ast.walk(tree):
             if isinstance(node, ast.BoolOp) and len(node.values) < 2:
                 return False
