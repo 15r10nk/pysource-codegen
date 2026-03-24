@@ -1432,6 +1432,12 @@ class StdGenerator(AstGenerator):
             if isinstance(node, ast.Match):
                 node = RemoveNameCleanup().visit(node)
 
+        if isinstance(node, ast.comprehension):
+            # is_async is logically boolean (0 = sync, 1 = async).  Any truthy
+            # value other than 1 (e.g. 2) compiles identically but does not
+            # round-trip through ast.unparse→ast.parse (always produces 1).
+            node.is_async = int(bool(node.is_async))
+
         if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
             if self.use(not context.in_async_context):
                 for comp in node.generators:

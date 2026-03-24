@@ -109,9 +109,7 @@ def equal_ast(
 ) -> bool:
 
     def dbg():
-        print(ast_dump(lhs))
-        print("!=")
-        print(ast_dump(rhs))
+        print(f"{t}: {ast_dump(lhs)} != {ast_dump(rhs)}")
 
     if type(lhs) is not type(rhs):
         dbg()
