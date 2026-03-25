@@ -1219,6 +1219,18 @@ class StdGenerator(AstGenerator):
                 # TODO: better format string generation
                 node.value = str(node.value)
 
+            if self.use(
+                (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and node.value == ""
+            ):
+                # An empty-string Constant inside a JoinedStr/TemplateStr is
+                # silently dropped by ast.parse(ast.unparse(...)), so it does
+                # not round-trip.  Replace it with a single space.
+                node.value = " "
+
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
             if self.use(not py310plus and node.conversion is None):
