@@ -740,12 +740,12 @@ class StdGenerator(AstGenerator):
             and context.in_ann_assign_annotation
         ):
             return None
-        # py3.14+: starred value in Interpolation is allowed in AnnAssign.annotation
-        # when simple=0 (e.g. `(x): t'{*0}'`). When simple=1 the compiler rejects it;
-        # fix() cleans up any Starred Interpolation.value in that case.
+        # py3.14+: starred value in Interpolation/FormattedValue is allowed in
+        # AnnAssign.annotation when simple=0 (e.g. `(x): t'{*0}'`, `(x): f'{*0}'`).
+        # When simple=1 the compiler rejects it; fix() cleans up those Starred nodes.
         if (
             py314plus
-            and p_info == ("Interpolation", "value")
+            and p_info in (("Interpolation", "value"), ("FormattedValue", "value"))
             and context.in_ann_assign_annotation
         ):
             return None
@@ -1203,6 +1203,10 @@ class StdGenerator(AstGenerator):
                 ):
                     n.target = n.target.value  # type: ignore[assignment]
                 if isinstance(n, ast.Interpolation) and isinstance(  # type: ignore[attr-defined]
+                    n.value, ast.Starred
+                ):
+                    n.value = n.value.value  # type: ignore[union-attr]
+                if isinstance(n, ast.FormattedValue) and isinstance(
                     n.value, ast.Starred
                 ):
                     n.value = n.value.value  # type: ignore[union-attr]
