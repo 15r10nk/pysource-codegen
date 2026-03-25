@@ -69,6 +69,7 @@ if __name__ == "__main__":
         name = sample_dir / f"{hashlib.sha256(content.encode()).hexdigest()}.py"
         name.write_text(content)
         subprocess.run(["git", "add", str(name)], check=True)
+        print(content)
         print(f"Saved: {name}")
 
     if args.seed is not None:

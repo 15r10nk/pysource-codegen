@@ -12,9 +12,45 @@ from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump, equal_ast
 from pysource_minimize._minimize import minimize_ast
 from .TestBase import TestBase
+import copy
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
+
+
+def cpython_is_valid_ast(tree, print):
+    ast.fix_missing_locations(tree)
+    try:
+        new_tree = copy.deepcopy(tree)
+        for e in ast.walk(new_tree):
+            if hasattr(e, "type_ignores"):
+                e.type_ignores = []
+        if not equal_ast(ast.parse(unparse(new_tree)), new_tree, print, "tree"):
+            return False
+    except Exception as e:
+        print(e)
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BoolOp) and len(node.values) < 2:
+            print("BoolOp with less then 2 elements")
+            return False
+        if not isinstance(node, ast.JoinedStr) and any(
+            isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
+        ):
+            print("FormattedValues without JoinedStr")
+            return False
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            ast.fix_missing_locations(tree)
+            source = unparse(tree)
+            compile(source, "<file>", "exec")
+            compile(tree, "<file>", "exec")
+    except Exception as e:
+        print("exception during `compile(ast.unparse(tree))`:\n" + str(e))
+        return False
+    return True
 
 
 class TestInvalidAst(TestBase):
@@ -28,31 +64,7 @@ class TestInvalidAst(TestBase):
             self.details.append(" ".join(map(str, text)))
 
     def does_compile(self, tree: ast.Module):
-        ast.fix_missing_locations(tree)
-        try:
-            if not equal_ast(ast.parse(unparse(tree)), tree, self.addDetail):
-                return False
-        except Exception:
-            return False
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.BoolOp) and len(node.values) < 2:
-                return False
-            if not isinstance(node, ast.JoinedStr) and any(
-                isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
-            ):
-                return False
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", SyntaxWarning)
-                ast.fix_missing_locations(tree)
-                source = unparse(tree)
-                compile(source, "<file>", "exec")
-                compile(tree, "<file>", "exec")
-        except Exception as e:
-            self.addDetail("exception during `compile(ast.unparse(tree))`:\n" + str(e))
-            return False
-        return True
+        return cpython_is_valid_ast(tree, self.addDetail)
 
 
 does_compile = TestInvalidAst().does_compile
@@ -130,28 +142,29 @@ def generate_invalid_ast(seed):
             print(ast_dump(last_checked_tree))
             raise
 
-        print(
-            "pysource-codegen thinks that the current ast produces valid python code, but this is not the case:"
-        )
-        info = "from ast import *\n"
+        info = "pysource-codegen thinks that the this ast is valid python code, but this is not the case:"
+        info += "from ast import *\n"
         info += f"tree = {ast_dump(new_tree)}\n"
         source = ""
+        comment = ""
+        comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
+
+        def addComment(*a):
+            nonlocal comment
+            comment += " ".join(a) + "\n"
+
+        assert not cpython_is_valid_ast(new_tree, addComment)
+
         try:
             source = unparse(new_tree)
-            compile(source, "<file>", "exec")
-            compile(ast.fix_missing_locations(new_tree), "<file>", "exec")
         except Exception as e:
-            comment = f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
-            if source:
-                comment += f"Source:\n{source}\n\n"
-            comment += f"\nError:\n    {e!r}"
-
-            info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
-
-            print(info)
-            return info
+            comment += f"\nError during unparse:\n    {e!r}"
         else:
-            assert False
+            comment += f"Source:\n{source}\n\n"
+
+        info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
+
+        return info
     return False
 
 
