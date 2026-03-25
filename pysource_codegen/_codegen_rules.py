@@ -1206,7 +1206,7 @@ class StdGenerator(AstGenerator):
             allowed_kind: list[str | None] = [None]
             if isinstance(node.value, str):
                 allowed_kind.append("u")
-            elif node.kind not in allowed_kind:
+            if node.kind not in allowed_kind:
                 node.kind = allowed_kind[hash(node.kind) % len(allowed_kind)]
 
             if self.use(
