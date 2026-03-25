@@ -1148,7 +1148,9 @@ class StdGenerator(AstGenerator):
             setattr(node, "type_comment", None)
 
         if isinstance(node, ast.ImportFrom):
-            if self.use(not py310plus and node.level is None):
+            if self.use(node.level is None):
+                # ast.parse always sets level to an int (never None); normalize
+                # so the tree is stable after an unparse→parse round-trip.
                 node.level = 0
 
             if self.use(
