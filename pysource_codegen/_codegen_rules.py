@@ -1242,6 +1242,17 @@ class StdGenerator(AstGenerator):
                 # not round-trip.  Replace it with a single space.
                 node.value = " "
 
+            if self.use(
+                (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and node.kind is not None
+            ):
+                # ast.parse always produces kind=None for Constant parts inside
+                # a JoinedStr/TemplateStr; the kind is lost on unparse→parse.
+                node.kind = None
+
         if self.use(
             isinstance(node, ast.JoinedStr)
             or (sys.version_info >= (3, 14) and isinstance(node, ast.TemplateStr))
