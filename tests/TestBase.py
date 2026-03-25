@@ -1,9 +1,11 @@
 import ast
+import copy
 import unittest
 import warnings
 from typing import List
 
 from pysource_codegen._codegen import unparse
+from pysource_codegen._utils import equal_ast
 
 
 class TestBase(unittest.TestCase):
@@ -23,6 +25,18 @@ class TestBase(unittest.TestCase):
         return "detailed info:\n" + "\n\n".join(self.details)
 
     def does_compile(self, tree: ast.Module) -> bool:
+        ast.fix_missing_locations(tree)
+        try:
+            new_tree = copy.deepcopy(tree)
+            for e in ast.walk(new_tree):
+                if hasattr(e, "type_ignores"):
+                    e.type_ignores = []
+            if not equal_ast(ast.parse(unparse(new_tree)), new_tree, print, "tree"):
+                return False
+        except Exception as e:
+            print(e)
+            return False
+
         for node in ast.walk(tree):
             if isinstance(node, ast.BoolOp) and len(node.values) < 2:
                 return False

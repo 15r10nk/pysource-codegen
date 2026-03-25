@@ -1,7 +1,6 @@
 import ast
 import sys
 import textwrap
-import warnings
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
@@ -9,62 +8,16 @@ sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / 
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
-from pysource_codegen._utils import ast_dump, equal_ast
+from pysource_codegen._utils import ast_dump
 from pysource_minimize._minimize import minimize_ast
 from .TestBase import TestBase
-import copy
 
 sample_dir = Path(__file__).parent / "invalid_ast_samples"
 sample_dir.mkdir(exist_ok=True)
 
 
-def cpython_is_valid_ast(tree, print):
-    ast.fix_missing_locations(tree)
-    try:
-        new_tree = copy.deepcopy(tree)
-        for e in ast.walk(new_tree):
-            if hasattr(e, "type_ignores"):
-                e.type_ignores = []
-        if not equal_ast(ast.parse(unparse(new_tree)), new_tree, print, "tree"):
-            return False
-    except Exception as e:
-        print(e)
-        return False
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BoolOp) and len(node.values) < 2:
-            print("BoolOp with less then 2 elements")
-            return False
-        if not isinstance(node, ast.JoinedStr) and any(
-            isinstance(n, ast.FormattedValue) for n in ast.iter_child_nodes(node)
-        ):
-            print("FormattedValues without JoinedStr")
-            return False
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", SyntaxWarning)
-            ast.fix_missing_locations(tree)
-            source = unparse(tree)
-            compile(source, "<file>", "exec")
-            compile(tree, "<file>", "exec")
-    except Exception as e:
-        print("exception during `compile(ast.unparse(tree))`:\n" + str(e))
-        return False
-    return True
-
-
 class TestInvalidAst(TestBase):
-
-    def setUp(self):
-        self.details = []
-        super().setUp()
-
-    def addDetail(self, *text):
-        if hasattr(self, "details"):
-            self.details.append(" ".join(map(str, text)))
-
-    def does_compile(self, tree: ast.Module):
-        return cpython_is_valid_ast(tree, self.addDetail)
+    pass
 
 
 does_compile = TestInvalidAst().does_compile
@@ -142,18 +95,19 @@ def generate_invalid_ast(seed):
             print(ast_dump(last_checked_tree))
             raise
 
-        info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:"
+        info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:\n"
         info += "from ast import *\n"
         info += f"tree = {ast_dump(new_tree)}\n"
         source = ""
         comment = ""
         comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
 
-        def addComment(*a):
-            nonlocal comment
-            comment += " ".join(a) + "\n"
+        t = TestBase()
+        t.setUp()
 
-        assert not cpython_is_valid_ast(new_tree, addComment)
+        assert not t.does_compile(new_tree)
+
+        comment += "\n".join(t.details)
 
         try:
             source = unparse(new_tree)

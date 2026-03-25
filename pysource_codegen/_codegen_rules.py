@@ -1184,6 +1184,11 @@ class StdGenerator(AstGenerator):
         ):
             node.simple = 0
 
+        if self.use(isinstance(node, ast.AnnAssign)):
+            # ast.parse always sets simple to 0 or 1; normalize arbitrary ints
+            # so the tree is stable after an unparse→parse round-trip.
+            node.simple = int(bool(node.simple))
+
         if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple != 0):
             # SyntaxError: starred comprehension target / starred Interpolation.value
             # in AnnAssign.annotation is only valid when simple=0 (parenthesised target).
