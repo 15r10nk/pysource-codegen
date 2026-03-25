@@ -1231,6 +1231,27 @@ class StdGenerator(AstGenerator):
                 # not round-trip.  Replace it with a single space.
                 node.value = " "
 
+        if self.use(
+            isinstance(node, ast.JoinedStr)
+            or (sys.version_info >= (3, 14) and isinstance(node, ast.TemplateStr))
+        ):
+            # CPython's parser merges adjacent Constant string parts when
+            # round-tripping through unparse→parse (e.g. [Const("'"), Const("'")]
+            # becomes [Const("''")]).  Pre-merge them here so the tree is stable.
+            new_values: list[ast.expr] = []
+            for v in node.values:
+                if (
+                    new_values
+                    and isinstance(new_values[-1], ast.Constant)
+                    and isinstance(v, ast.Constant)
+                    and isinstance(new_values[-1].value, str)
+                    and isinstance(v.value, str)
+                ):
+                    new_values[-1].value += v.value  # type: ignore[union-attr]
+                else:
+                    new_values.append(v)
+            node.values = new_values
+
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
             if self.use(not py310plus and node.conversion is None):

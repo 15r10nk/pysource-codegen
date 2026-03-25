@@ -142,7 +142,7 @@ def generate_invalid_ast(seed):
             print(ast_dump(last_checked_tree))
             raise
 
-        info = "pysource-codegen thinks that the this ast is valid python code, but this is not the case:"
+        info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:"
         info += "from ast import *\n"
         info += f"tree = {ast_dump(new_tree)}\n"
         source = ""
