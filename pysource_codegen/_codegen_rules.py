@@ -1635,6 +1635,20 @@ class StdGenerator(AstGenerator):
                     else:
                         n.str = ast.unparse(f_str)[3:-2]  # strip f"{...}"
 
+                if self.use(
+                    isinstance(n, ast.Interpolation)
+                    and n.format_spec is not None
+                    and n.conversion == -1
+                    and "!" in n.str
+                ):
+                    # CPython parser bug: when the expression text contains '!'
+                    # (only possible via '!=' / NotEq) AND a format_spec is
+                    # present AND there is no conversion flag, the parser
+                    # misidentifies '!' as the start of a conversion flag and
+                    # truncates 'str' at '!'.  Removing format_spec avoids the
+                    # round-trip failure (t'{0 != 0}' round-trips correctly).
+                    n.format_spec = None
+
         return self.fix_nonlocal(node)
 
     def fix_nonlocal(self, node: ast.AST) -> ast.AST:
