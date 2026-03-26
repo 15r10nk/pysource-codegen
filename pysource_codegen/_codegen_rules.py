@@ -765,13 +765,6 @@ class StdGenerator(AstGenerator):
     ) -> float | None:
         if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
             raise Invalid
-        if py310plus and p_info == ("withitem", "context_expr"):
-            # Python 3.10+ re-uses the parenthesised `with (...)` form for
-            # multiple context managers, so `ast.unparse` of a Tuple in
-            # withitem.context_expr round-trips to the individual elements
-            # rather than a Tuple (e.g. `with (0,): pass` parses back as
-            # `withitem(context_expr=Constant(0))`).
-            raise Invalid
         return None
 
     def probability_try_UnaryOp(
@@ -989,7 +982,13 @@ class StdGenerator(AstGenerator):
             ("ParamSpec", "default_value"),
         ):
             ctx.in_annotation_scope = True
-        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+        elif (node_type, attr) in (
+            ("GeneratorExp", "elt"),
+            ("ListComp", "elt"),
+            ("SetComp", "elt"),
+            ("DictComp", "key"),
+            ("DictComp", "value"),
+        ) or (
             attr == "body"
             and node_type
             in (
@@ -999,14 +998,21 @@ class StdGenerator(AstGenerator):
                 "ClassDef",
             )
         ):
-            # GeneratorExp creates its own implicit function scope, so annotation-scope
-            # restrictions from the surrounding code do not apply inside its body.
+            # All comprehensions create their own implicit function scope, so
+            # annotation-scope restrictions from the surrounding code do not apply
+            # inside their body (elt/key/value).
             ctx.in_annotation_scope = False
 
         # --- in_ann_assign_annotation: inside AnnAssign.annotation ---
         if node_type == "AnnAssign" and attr == "annotation":
             ctx.in_ann_assign_annotation = True
-        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+        elif (node_type, attr) in (
+            ("GeneratorExp", "elt"),
+            ("ListComp", "elt"),
+            ("SetComp", "elt"),
+            ("DictComp", "key"),
+            ("DictComp", "value"),
+        ) or (
             attr == "body"
             and node_type
             in (
@@ -1083,7 +1089,13 @@ class StdGenerator(AstGenerator):
             ("AsyncFunctionDef", "returns"),
         ):
             ctx.in_annotation_return_scope = True
-        elif (node_type, attr) == ("GeneratorExp", "elt") or (
+        elif (node_type, attr) in (
+            ("GeneratorExp", "elt"),
+            ("ListComp", "elt"),
+            ("SetComp", "elt"),
+            ("DictComp", "key"),
+            ("DictComp", "value"),
+        ) or (
             attr == "body"
             and node_type
             in (
@@ -1135,6 +1147,19 @@ class StdGenerator(AstGenerator):
         # through unparse → parse, so we always force them to None.
         if hasattr(node, "type_comment"):
             setattr(node, "type_comment", None)
+
+        if self.use(
+            py310plus
+            and isinstance(node, ast.withitem)
+            and isinstance(node.context_expr, ast.Tuple)
+            and bool(node.context_expr.elts)
+        ):
+            # Python 3.10+ treats `with (a, b):` as multiple context managers,
+            # so ast.unparse of withitem(context_expr=Tuple([a, b])) produces
+            # `with a, b:` which parses back as two separate withitems — the
+            # Tuple wrapper is lost.  Replace with the first element so the
+            # generated tree always round-trips.
+            node.context_expr = node.context_expr.elts[0]
 
         if isinstance(node, ast.ImportFrom):
             if self.use(node.level is None):
@@ -1499,8 +1524,52 @@ class StdGenerator(AstGenerator):
             if self.use(hasattr(node, "type_params")):
                 node.type_params = unique_by(node.type_params, lambda p: p.name)
 
-            def cleanup_annotation(annotation):
+            def cleanup_annotation(
+                annotation: ast.expr,
+                stop_at_inner_scopes: bool = False,
+            ) -> ast.expr:
+                """Remove invalid constructs (walrus, yield, await) from an annotation.
+
+                ``stop_at_inner_scopes=True`` prevents recursion into comprehension
+                bodies (ListComp/SetComp/DictComp/GeneratorExp) and Lambda bodies.
+                Use this for annotation positions (e.g. AnnAssign.annotation on
+                3.14+) where walrus *inside* a comprehension or lambda is still
+                valid because those inner scopes have their own function frame.
+                Leave ``stop_at_inner_scopes=False`` for type-scope positions
+                (TypeVar.bound, TypeAlias.value, generic-function annotations) where
+                walrus is invalid even inside nested comprehensions.
+                """
+
                 class Transformer(ast.NodeTransformer):
+                    if stop_at_inner_scopes:
+                        # Comprehensions and lambdas create their own implicit
+                        # function scope, so walrus/yield/await inside them is
+                        # valid in 3.14+ annotation contexts.  Stop recursion.
+                        def visit_ListComp(
+                            self, node: ast.ListComp
+                        ) -> ast.AST | list[ast.AST] | None:
+                            return node
+
+                        def visit_SetComp(
+                            self, node: ast.SetComp
+                        ) -> ast.AST | list[ast.AST] | None:
+                            return node
+
+                        def visit_DictComp(
+                            self, node: ast.DictComp
+                        ) -> ast.AST | list[ast.AST] | None:
+                            return node
+
+                        def visit_GeneratorExp(
+                            self, node: ast.GeneratorExp
+                        ) -> ast.AST | list[ast.AST] | None:
+                            return node
+
+                        def visit_Lambda(
+                            self, node: ast.Lambda
+                        ) -> ast.AST | list[ast.AST] | None:
+                            return node
+
                     def visit_NamedExpr(self, node: ast.NamedExpr):
                         if not use():
                             return self.generic_visit(node)
@@ -1529,12 +1598,7 @@ class StdGenerator(AstGenerator):
                             return self.generic_visit(node)
                         return self.visit(node.value)
 
-                    # def visit_Lambda(self, node: ast.Lambda) -> ast.AST | list[ast.AST] | None:
-                    #     if not use():
-                    #         return self.generic_visit(node)
-                    #     return self.visit(node.body)
-
-                return Transformer().visit(annotation)
+                return Transformer().visit(annotation)  # type: ignore[return-value]
 
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -1571,7 +1635,18 @@ class StdGenerator(AstGenerator):
                         n.bound = cleanup_annotation(n.bound)
 
             if self.use(isinstance(node, ast.AnnAssign)):
-                node.annotation = cleanup_annotation(node.annotation)
+                if py314plus:
+                    # PEP 649 (3.14+): walrus/yield/await at the top level of
+                    # AnnAssign.annotation are now invalid (lazy code object).
+                    # However, walrus/yield/await inside a comprehension or lambda
+                    # body remain valid because those inner scopes have their own
+                    # implicit function frame.  Use stop_at_inner_scopes=True so
+                    # cleanup_annotation does not descend into those boundaries.
+                    node.annotation = cleanup_annotation(
+                        node.annotation, stop_at_inner_scopes=True
+                    )
+                # else (3.12/3.13): walrus/yield/await are valid everywhere in
+                # AnnAssign.annotation — no cleanup needed.
 
         if sys.version_info >= (3, 13):
             if hasattr(node, "type_params"):
