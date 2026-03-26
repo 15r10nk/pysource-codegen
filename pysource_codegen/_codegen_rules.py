@@ -751,6 +751,10 @@ class StdGenerator(AstGenerator):
         if context.in_ann_assign_target:
             # TODO this might be a cpython bug
             raise Invalid
+        if py311plus and context.in_ann_assign_subscript_slice:
+            # SyntaxError: can't use starred expression here
+            # On py311+ `a[*x,] = y` is valid but `a[*x,]: T` is not.
+            raise Invalid
         return None
 
     def probability_try_Tuple(
@@ -1031,6 +1035,25 @@ class StdGenerator(AstGenerator):
 
         # --- in_ann_assign_target: inside AnnAssign.target ---
         ctx.in_ann_assign_target = node_type == "AnnAssign" and attr == "target"
+
+        # --- in_ann_assign_subscript_slice: inside the slice of a Subscript that is
+        #     the AnnAssign.target.  Starred in a subscript slice is a SyntaxError when
+        #     the subscript is an AnnAssign target on py311+ (even though it is valid
+        #     for regular assignment targets, e.g. `a[*x,] = y` is valid but
+        #     `a[*x,]: T` is not).  The flag is transparent through Tuple.elts /
+        #     List.elts within the slice, but is cleared when a nested Subscript is
+        #     encountered (that nested subscript is in Load context and its slice can
+        #     freely contain Starred). ---
+        if (node_type, attr) == ("Subscript", "slice") and context.in_ann_assign_target:
+            ctx.in_ann_assign_subscript_slice = True
+        elif (
+            context.in_ann_assign_subscript_slice
+            and node_type in ("Tuple", "List")
+            and attr == "elts"
+        ):
+            pass  # transparent through Tuple/List elts within the slice
+        else:
+            ctx.in_ann_assign_subscript_slice = False
 
         # --- in_delete_target: inside Delete.targets, cleared once inside sub-expression ---
         if node_type == "Delete" and attr == "targets":

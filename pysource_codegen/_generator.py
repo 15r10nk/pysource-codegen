@@ -92,6 +92,10 @@ class Context:
     # (Assign.targets, For.target, AnnAssign.target, AugAssign.target, NamedExpr.target,
     #  TypeAlias.name, withitem.optional_vars, comprehension.target, AsyncFor.target)
     in_store_target: bool = False
+    # True inside the Subscript.slice that belongs to an AnnAssign.target subscript
+    # (including through nested Tuple/List elts).  Starred is a SyntaxError in this
+    # position on py311+ even though it is valid in regular assignment Subscript.slices.
+    in_ann_assign_subscript_slice: bool = False
 
     def copy(self) -> Context:
         new = Context.__new__(Context)
