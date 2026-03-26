@@ -731,24 +731,6 @@ class StdGenerator(AstGenerator):
         # py3.13+: TypeVarTuple default_value is a Starred expression: def f[*Ts = *int]()
         if py313plus and p_info == ("TypeVarTuple", "default_value"):
             return None
-        # py3.14+: starred target in comprehension is allowed in AnnAssign.annotation
-        # when simple=0 (e.g. `(x): {0: 0 for *y in z}`). When simple=1 the compiler
-        # rejects it; fix() cleans up any Starred comprehension targets in that case.
-        if (
-            py314plus
-            and p_info == ("comprehension", "target")
-            and context.in_ann_assign_annotation
-        ):
-            return None
-        # py3.14+: starred value in Interpolation/FormattedValue is allowed in
-        # AnnAssign.annotation when simple=0 (e.g. `(x): t'{*0}'`, `(x): f'{*0}'`).
-        # When simple=1 the compiler rejects it; fix() cleans up those Starred nodes.
-        if (
-            py314plus
-            and p_info in (("Interpolation", "value"), ("FormattedValue", "value"))
-            and context.in_ann_assign_annotation
-        ):
-            return None
         # py3.15+: starred expressions are allowed as comprehension elements
         # (e.g. {*x for x in y}, [*x for x in y], (*x for x in y)) — but NOT
         # in DictComp.key or DictComp.value.
@@ -1190,26 +1172,6 @@ class StdGenerator(AstGenerator):
             # ast.parse always sets simple to 0 or 1; normalize arbitrary ints
             # so the tree is stable after an unparse→parse round-trip.
             node.simple = int(bool(node.simple))
-
-        if self.use(py314plus and isinstance(node, ast.AnnAssign) and node.simple != 0):
-            # SyntaxError: starred comprehension target / starred Interpolation.value
-            # in AnnAssign.annotation is only valid when simple=0 (parenthesised target).
-            # Strip any *x → x.
-            # CPython treats any non-zero simple as "simple" (bare-name style),
-            # so simple=2 etc. also trigger the error.
-            for n in ast.walk(node.annotation):
-                if isinstance(n, ast.comprehension) and isinstance(
-                    n.target, ast.Starred
-                ):
-                    n.target = n.target.value  # type: ignore[assignment]
-                if isinstance(n, ast.Interpolation) and isinstance(  # type: ignore[attr-defined]
-                    n.value, ast.Starred
-                ):
-                    n.value = n.value.value  # type: ignore[union-attr]
-                if isinstance(n, ast.FormattedValue) and isinstance(
-                    n.value, ast.Starred
-                ):
-                    n.value = n.value.value  # type: ignore[union-attr]
 
         if isinstance(node, ast.Constant):
             # TODO: what is Constant.kind

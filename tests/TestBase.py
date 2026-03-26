@@ -1,5 +1,6 @@
 import ast
 import copy
+import sys
 import unittest
 import warnings
 from typing import List
@@ -31,11 +32,28 @@ class TestBase(unittest.TestCase):
             for e in ast.walk(new_tree):
                 if hasattr(e, "type_ignores"):
                     e.type_ignores = []
-            if not equal_ast(ast.parse(unparse(new_tree)), new_tree, print, "tree"):
+            if not equal_ast(
+                ast.parse(unparse(new_tree)), new_tree, self.addDetail, "tree"
+            ):
                 return False
         except Exception as e:
             print(e)
             return False
+
+        if sys.version_info >= (3, 14):
+            for e in ast.walk(tree):
+                if isinstance(e, ast.AnnAssign) and not e.simple:
+                    ann_stmt = ast.Module(
+                        body=[
+                            ast.Expr(
+                                copy.deepcopy(e.annotation),
+                            )
+                        ],
+                        type_ignores=[],
+                    )
+                    if not self.does_compile(ann_stmt):
+                        self.addDetail("can not compile annotation", e.annotation)
+                        return False
 
         for node in ast.walk(tree):
             if isinstance(node, ast.BoolOp) and len(node.values) < 2:

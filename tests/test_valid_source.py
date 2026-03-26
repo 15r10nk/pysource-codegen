@@ -37,6 +37,8 @@ def gen_test(name: str, file: Path) -> None:
         except Exception:
             return
 
+        self.addDetail(ast.dump(tree))
+
         if not self.does_compile(tree):
             self.addDetail("the following code should be invalid:\n" + code)
             self.assertFalse(is_valid_ast(tree, self.addDetail), msg=self.message())
