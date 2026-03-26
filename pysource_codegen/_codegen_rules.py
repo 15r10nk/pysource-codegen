@@ -765,6 +765,13 @@ class StdGenerator(AstGenerator):
     ) -> float | None:
         if p_info in (("AugAssign", "target"), ("AnnAssign", "target")):
             raise Invalid
+        if py310plus and p_info == ("withitem", "context_expr"):
+            # Python 3.10+ re-uses the parenthesised `with (...)` form for
+            # multiple context managers, so `ast.unparse` of a Tuple in
+            # withitem.context_expr round-trips to the individual elements
+            # rather than a Tuple (e.g. `with (0,): pass` parses back as
+            # `withitem(context_expr=Constant(0))`).
+            raise Invalid
         return None
 
     def probability_try_UnaryOp(
