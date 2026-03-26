@@ -1639,6 +1639,7 @@ class StdGenerator(AstGenerator):
                     isinstance(n, ast.Interpolation)
                     and n.format_spec is not None
                     and n.conversion == -1
+                    and isinstance(n.str, str)
                     and "!" in n.str
                 ):
                     # CPython parser bug: when the expression text contains '!'
