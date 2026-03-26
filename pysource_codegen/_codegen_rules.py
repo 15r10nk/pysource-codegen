@@ -1112,17 +1112,19 @@ class StdGenerator(AstGenerator):
         elif is_function_def or node_type == "ClassDef":
             ctx.in_comprehension_in_type_scope = False
 
-        # --- in_comprehension_in_ann_assign_annotation: inside a comprehension nested inside
-        #     AnnAssign.annotation (without an intervening function/class boundary).
-        #     On py314+ the annotation is a non-async code object, so await inside a
-        #     comprehension there raises "asynchronous comprehension outside of an
-        #     asynchronous function".  Not cleared at comprehension boundaries. ---
-        if node_type in comprehensions and (
+        # --- in_comprehension_in_ann_assign_annotation: inside a SetComp/ListComp/DictComp
+        #     nested inside AnnAssign.annotation (without an intervening function/class/
+        #     GeneratorExp boundary).  On py314+ the annotation is a non-async code object,
+        #     so await inside a set/list/dict comprehension there raises "asynchronous
+        #     comprehension outside of an asynchronous function".
+        #     GeneratorExp is excluded: (await x for x in y) is an async generator
+        #     expression, valid to create in any context (it is lazy). ---
+        if node_type in ("SetComp", "ListComp", "DictComp") and (
             context.in_ann_assign_annotation
             or context.in_comprehension_in_ann_assign_annotation
         ):
             ctx.in_comprehension_in_ann_assign_annotation = True
-        elif is_function_def or node_type == "ClassDef":
+        elif is_function_def or node_type in ("ClassDef", "GeneratorExp"):
             ctx.in_comprehension_in_ann_assign_annotation = False
 
         # --- in_annotation_return_scope: subset of in_annotation_scope covering only the three positions
