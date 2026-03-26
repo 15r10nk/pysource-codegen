@@ -1,8 +1,6 @@
 import ast
-from typing import Optional
 
 from pysource_codegen._codegen_rules import StdGenerator
-from pysource_codegen._generator import Context
 from pysource_codegen._generator import NodeRef
 from pysource_codegen._utils import equal_ast
 
@@ -83,27 +81,3 @@ class AstChecker(StdGenerator):
     ):
         target_node = parent_node.relocate(self.target)
         place(target_node.node)
-
-    def context_before(
-        self, context: Context, node: NodeRef, attr: str, index: Optional[int]
-    ) -> Context:
-        ctx = super().context_before(context, node, attr, index)
-        node_type = type(node.node).__name__
-        # in_ann_assign_subscript_slice: the base StdGenerator conservatively sets
-        # this flag whenever entering Subscript.slice inside AnnAssign.target,
-        # because at generation time the AnnAssign.value hasn't been generated yet.
-        # But the SyntaxError only fires when AnnAssign.value is None — when the
-        # AnnAssign has a value, Starred in the subscript slice compiles fine.
-        # The checker has access to the full target tree, so it can check here.
-        if ctx.in_ann_assign_subscript_slice and (node_type, attr) == (
-            "Subscript",
-            "slice",
-        ):
-            target_subscript = node.relocate(self.target)
-            if (
-                target_subscript.parent is not None
-                and isinstance(target_subscript.parent.node, ast.AnnAssign)
-                and getattr(target_subscript.parent.node, "value", None) is not None
-            ):
-                ctx.in_ann_assign_subscript_slice = False
-        return ctx

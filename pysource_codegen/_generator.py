@@ -96,6 +96,10 @@ class Context:
     # (including through nested Tuple/List elts).  Starred is a SyntaxError in this
     # position on py311+ even though it is valid in regular assignment Subscript.slices.
     in_ann_assign_subscript_slice: bool = False
+    # True when inside AnnAssign.target and the AnnAssign already has a non-None
+    # value.  Meaningful only when in_ann_assign_target is True.  Requires that
+    # attr_order generates AnnAssign.value before AnnAssign.target.
+    ann_assign_has_value: bool = False
 
     def copy(self) -> Context:
         new = Context.__new__(Context)
@@ -243,6 +247,15 @@ class AstGenerator:
     ) -> Context:
         return context
 
+    def attr_order(self, ast_type_name: str, field_names: list[str]) -> list[str]:
+        """Return the order in which the fields of *ast_type_name* are generated.
+
+        Default: definition order (same as *field_names*).  Override to control
+        which fields are generated first so that earlier fields are already set
+        on ``node.node`` when ``context_before`` is called for later fields.
+        """
+        return field_names
+
     def generate(self, ast_type_name: str, depth: int = 0) -> ast.AST:
         result = None
         context = Context()
@@ -318,7 +331,8 @@ class AstGenerator:
 
         attr_length = self.attr_length_provider(new_node)
 
-        for attr_name, (node_type, quantity) in info.fields.items():
+        for attr_name in self.attr_order(ast_type_name, list(info.fields.keys())):
+            node_type, quantity = info.fields[attr_name]
             child_context = self.context_before(context, new_node, attr_name, None)
 
             if "*" in quantity:

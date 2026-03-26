@@ -1035,17 +1035,22 @@ class StdGenerator(AstGenerator):
 
         # --- in_ann_assign_target: inside AnnAssign.target ---
         ctx.in_ann_assign_target = node_type == "AnnAssign" and attr == "target"
+        # Since attr_order generates AnnAssign.value before AnnAssign.target,
+        # node.node.value is already set at this point.  Capture it so the
+        # subscript-slice check below can allow Starred when value is present.
+        if node_type == "AnnAssign" and attr == "target":
+            ctx.ann_assign_has_value = getattr(node.node, "value", None) is not None
 
         # --- in_ann_assign_subscript_slice: inside the slice of a Subscript that is
-        #     the AnnAssign.target.  Starred in a subscript slice is a SyntaxError when
-        #     the subscript is an AnnAssign target on py311+ (even though it is valid
-        #     for regular assignment targets, e.g. `a[*x,] = y` is valid but
-        #     `a[*x,]: T` is not).  The flag is transparent through Tuple.elts /
-        #     List.elts within the slice, but is cleared when a nested Subscript is
-        #     encountered (that nested subscript is in Load context and its slice can
-        #     freely contain Starred). ---
+        #     the AnnAssign.target.  Starred in a subscript slice is a SyntaxError on
+        #     py311+ ONLY when the AnnAssign has no value (e.g. `a[*x,]: T` is invalid
+        #     but `a[*x,]: T = v` compiles fine).  The flag is transparent through
+        #     Tuple.elts / List.elts within the slice, but is cleared when a nested
+        #     Subscript is encountered (that nested subscript is in Load context and its
+        #     slice can freely contain Starred). ---
         if (node_type, attr) == ("Subscript", "slice") and context.in_ann_assign_target:
-            ctx.in_ann_assign_subscript_slice = True
+            # Restrict Starred only when the AnnAssign has no value.
+            ctx.in_ann_assign_subscript_slice = not context.ann_assign_has_value
         elif (
             context.in_ann_assign_subscript_slice
             and node_type in ("Tuple", "List")
@@ -2128,6 +2133,16 @@ class StdGenerator(AstGenerator):
         ):
             return False
         return True
+
+    def attr_order(self, ast_type_name: str, field_names: list[str]) -> list[str]:
+        if ast_type_name == "AnnAssign":
+            # Generate 'value' before 'target' so that context_before for
+            # AnnAssign.target can inspect node.node.value and know whether
+            # Starred in a subscript slice is valid (it is when value is not None).
+            result = [n for n in field_names if n != "value"]
+            result.insert(result.index("target"), "value")
+            return result
+        return field_names
 
     def same_length(self) -> dict[str, list[str]]:
         return {
