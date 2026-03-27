@@ -1330,6 +1330,34 @@ class StdGenerator(AstGenerator):
                 node.value = str(node.value)
 
             if self.use(
+                not py312plus
+                and (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and isinstance(node.value, str)
+                and "\\" in node.value
+                and (
+                    # On <3.9 (astunparse), backslashes in f-string literal
+                    # constants are not correctly escaped: the output can be
+                    # `f'\'` (a SyntaxError) instead of `f'\\'`.
+                    not py39plus
+                    # On 3.9–3.11, backslashes inside the *expression* part of
+                    # an f-string (`{...}`) are forbidden.  When this JoinedStr
+                    # is nested inside a FormattedValue.value, the backslash
+                    # ends up in the expression part of the outer f-string and
+                    # ast.unparse raises ValueError('Unable to avoid backslash
+                    # in f-string expression part').
+                    # fstring_value_depth > 0 means we are inside at least one
+                    # FormattedValue.value chain.
+                    or context.fstring_value_depth > 0
+                )
+            ):
+                # Strip backslashes so the tree is always representable.
+                # An empty result is handled by the next (empty → " ") block.
+                node.value = node.value.replace("\\", "")
+
+            if self.use(
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
