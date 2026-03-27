@@ -714,6 +714,9 @@ class StdGenerator(AstGenerator):
                 and gpar is not None
                 and (type(gpar.node).__name__, par.parent_attr) == ("Subscript", "slice")  # type: ignore[union-attr]
             )
+            or p_info == ("ExtSlice", "dims")
+            # On 3.8, ExtSlice.dims may contain Slice: e.g. a[:, :] parses as
+            # ExtSlice(dims=[Slice(), Slice()]).
         ):
             raise Invalid
         return None

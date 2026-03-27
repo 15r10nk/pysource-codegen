@@ -437,3 +437,17 @@ type_infos = {
         fields={"lineno": ("int", ""), "tag": ("string", "")}, ast_type=ast.TypeIgnore
     ),
 }
+
+if sys.version_info >= (3, 9):
+    # On 3.9+, ast.parse no longer wraps subscript indices in Index/ExtSlice.
+    # Subscript.slice is now any expr.  Slice is added to the expr union (but
+    # probability_try_Slice still restricts it to subscript/ExtSlice.dims positions).
+    type_infos["expr"] = UnionNodeType(options=[*type_infos["expr"].options, "Slice"])
+    type_infos["Subscript"] = NodeType(
+        fields={
+            "value": ("expr", ""),
+            "slice": ("expr", ""),
+            "ctx": ("expr_context", ""),
+        },
+        ast_type=ast.Subscript,
+    )
