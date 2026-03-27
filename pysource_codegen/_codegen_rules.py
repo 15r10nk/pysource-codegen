@@ -1235,6 +1235,34 @@ class StdGenerator(AstGenerator):
             ):
                 node.context_expr = node.context_expr.elts[0]
 
+        if self.use(hasattr(ast, "ExtSlice") and isinstance(node, ast.ExtSlice)):
+            # ExtSlice only round-trips when it has ≥2 dims AND at least one is a
+            # Slice.  ast.parse(ast.unparse(…)) otherwise returns a different node
+            # type:
+            #   ExtSlice([Index(e)])        → unparse "a[e]"     → parse Index(e)
+            #   ExtSlice([Slice(a,b)])      → unparse "a[a:b]"   → parse Slice(a,b)
+            #   ExtSlice([Index(x),Index(y)])→ unparse "a[x, y]" → parse Index(Tuple)
+            # Normalise to the canonical form so the generator never emits a tree
+            # that does_compile would reject for this reason, and the checker
+            # correctly marks such trees as invalid.
+            dims = node.dims  # type: ignore[union-attr]
+            has_slice = any(isinstance(d, ast.Slice) for d in dims)
+            if len(dims) <= 1:
+                # 0 dims: keep as Index(Tuple([])) → a[()]
+                # 1 dim : unwrap the ExtSlice wrapper entirely
+                if len(dims) == 0:
+                    return ast.Index(value=ast.Tuple(elts=[], ctx=ast.Load()))  # type: ignore[attr-defined]
+                return dims[0]  # Slice(…) or Index(e)
+            if not has_slice:
+                # ≥2 all-Index dims: ast.parse("a[x, y]") → Index(Tuple([x, y]))
+                return ast.Index(  # type: ignore[attr-defined]
+                    value=ast.Tuple(
+                        elts=[d.value for d in dims],  # type: ignore[union-attr]
+                        ctx=ast.Load(),
+                    )
+                )
+            # ≥2 dims with at least one Slice: round-trips correctly, keep as-is.
+
         if isinstance(node, ast.ImportFrom):
             if self.use(node.level is None):
                 # ast.parse always sets level to an int (never None); normalize
@@ -2145,7 +2173,7 @@ class StdGenerator(AstGenerator):
         if node_type == "Match" and attr_name == "cases":
             return 1
         if node_type == "ExtSlice" and attr_name == "dims":
-            return 1
+            return 2
         if node_type == "Set" and attr_name == "elts":
             # An empty set literal does not exist in Python syntax: {} parses as a
             # dict, so Set.elts must always have at least one element.
