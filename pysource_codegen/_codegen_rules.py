@@ -1208,7 +1208,10 @@ class StdGenerator(AstGenerator):
             # `with a, b:` which parses back as two separate withitems — the
             # Tuple wrapper is lost.  Replace with the first element so the
             # generated tree always round-trips.
-            node.context_expr = node.context_expr.elts[0]
+            # Use a loop because elts[0] may itself be a Tuple (e.g. when the
+            # generator produced a nested Tuple expression at this position).
+            while isinstance(node.context_expr, ast.Tuple) and node.context_expr.elts:
+                node.context_expr = node.context_expr.elts[0]
 
         if isinstance(node, ast.ImportFrom):
             if self.use(node.level is None):
