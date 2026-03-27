@@ -89,6 +89,16 @@ class Context:
     # NOT cleared at SetComp/ListComp/DictComp boundaries (nested comprehensions stay).
     # Cleared at function/lambda/class/GeneratorExp boundaries.
     in_comprehension_in_ann_assign_annotation: bool = False
+    # True inside a SetComp/ListComp/DictComp that is nested inside an
+    # annotation-return-scope position (arg.annotation, FunctionDef.returns,
+    # AsyncFunctionDef.returns) without an intervening function/class/GeneratorExp
+    # boundary.  Same reasoning as in_comprehension_in_ann_assign_annotation: on
+    # py314+, these positions become non-async lazy code objects (PEP 649), so await
+    # inside a set/list/dict comprehension there is a SyntaxError
+    # ("asynchronous comprehension outside of an asynchronous function").
+    # NOT cleared at SetComp/ListComp/DictComp boundaries (nested comprehensions stay).
+    # Cleared at function/lambda/class/GeneratorExp boundaries.
+    in_comprehension_in_annotation_return_scope: bool = False
     # True inside arg.annotation, FunctionDef.returns, or AsyncFunctionDef.returns.
     # These three positions become lazily-evaluated code objects under PEP 649 (3.14+),
     # which makes := a SyntaxError there even though it is valid in ClassDef.bases etc.

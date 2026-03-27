@@ -388,10 +388,11 @@ class StdGenerator(AstGenerator):
             context.in_annotation_return_scope
             or context.in_ann_assign_annotation
             or context.in_comprehension_in_ann_assign_annotation
+            or context.in_comprehension_in_annotation_return_scope
         ):
             # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
             # lazy code objects, making await a SyntaxError there.  This also covers
-            # await inside a comprehension inside AnnAssign.annotation, because the
+            # await inside a comprehension inside those positions, because the
             # comprehension's implicit async code object would sit inside a non-async
             # annotation code object → "asynchronous comprehension outside of an
             # asynchronous function".
@@ -1126,6 +1127,19 @@ class StdGenerator(AstGenerator):
             ctx.in_comprehension_in_ann_assign_annotation = True
         elif is_function_def or node_type in ("ClassDef", "GeneratorExp"):
             ctx.in_comprehension_in_ann_assign_annotation = False
+
+        # --- in_comprehension_in_annotation_return_scope: inside a SetComp/ListComp/DictComp
+        #     nested inside an annotation-return-scope position (arg.annotation,
+        #     FunctionDef.returns, AsyncFunctionDef.returns) without an intervening
+        #     function/class/GeneratorExp boundary.  Same reasoning as
+        #     in_comprehension_in_ann_assign_annotation. ---
+        if node_type in ("SetComp", "ListComp", "DictComp") and (
+            context.in_annotation_return_scope
+            or context.in_comprehension_in_annotation_return_scope
+        ):
+            ctx.in_comprehension_in_annotation_return_scope = True
+        elif is_function_def or node_type in ("ClassDef", "GeneratorExp"):
+            ctx.in_comprehension_in_annotation_return_scope = False
 
         # --- in_annotation_return_scope: subset of in_annotation_scope covering only the three positions
         #     that PEP 649 (3.14+) makes lazily-evaluated code objects: arg.annotation,
