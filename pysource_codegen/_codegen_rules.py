@@ -1210,7 +1210,15 @@ class StdGenerator(AstGenerator):
             # generated tree always round-trips.
             # Use a loop because elts[0] may itself be a Tuple (e.g. when the
             # generator produced a nested Tuple expression at this position).
-            while isinstance(node.context_expr, ast.Tuple) and node.context_expr.elts:
+            # Stop before unwrapping to a Starred: Tuple([*x]) unparses as
+            # `(*x,)`, which round-trips correctly as a single-element tuple
+            # context manager.  Starred is forbidden directly in context_expr,
+            # so we must keep the Tuple wrapper in that case.
+            while (
+                isinstance(node.context_expr, ast.Tuple)
+                and node.context_expr.elts
+                and not isinstance(node.context_expr.elts[0], ast.Starred)
+            ):
                 node.context_expr = node.context_expr.elts[0]
 
         if isinstance(node, ast.ImportFrom):
