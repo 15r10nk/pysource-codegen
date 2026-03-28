@@ -281,10 +281,18 @@ class StdGenerator(AstGenerator):
                     # Call?,Attribute*
                     parents = list(parents)
                     if parents and parents[0] == ("Call", "func"):
-                        parents.pop()
+                        parents.pop(0)
                     return all(p == ("Attribute", "value") for p in parents)
 
-                if valid_deco_parents(deco_parents) and child_name != "Name":
+                # At the top of decorator_list, Call and Attribute are also
+                # valid (e.g. @name() or @name.attr).  Inside Call.func /
+                # Attribute.value chains only Name and Attribute are allowed.
+                allowed_deco = (
+                    {"Name", "Attribute", "Call"}
+                    if not deco_parents
+                    else {"Name", "Attribute"}
+                )
+                if valid_deco_parents(deco_parents) and child_name not in allowed_deco:
                     raise Invalid
 
         # type alias
