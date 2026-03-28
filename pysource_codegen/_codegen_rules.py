@@ -1358,6 +1358,26 @@ class StdGenerator(AstGenerator):
                 node.value = node.value.replace("\\", "")
 
             if self.use(
+                not py39plus
+                and (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and isinstance(node.value, str)
+                and "'" in node.value
+                and '"' in node.value
+            ):
+                # On <3.9 (astunparse), when the f-string literal constant
+                # contains BOTH single-quote and double-quote characters,
+                # astunparse falls back to a triple-double-quoted f-string.
+                # If the content then ends with `"` (e.g. value = `'"`),
+                # the close delimiter `"""` creates `""""` which Python parses
+                # as an empty triple-double-quoted string followed by a bare
+                # `"` → SyntaxError.  Strip `"` so astunparse uses a simple
+                # double-quoted f-string where `'` is literal.
+                node.value = node.value.replace('"', "")
+
+            if self.use(
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
