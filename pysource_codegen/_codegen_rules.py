@@ -381,7 +381,17 @@ class StdGenerator(AstGenerator):
                     )
                 )
             )
-            if not in_genexp_inner:
+            # On <3.14, annotation expressions are not lazily evaluated, so
+            # await inside AnnAssign.annotation or function/arg annotations is
+            # valid even outside an async function.  (3.14+ makes annotations
+            # lazy code objects, disallowing await there — handled below.)
+            in_unevaluated_annotation = not py314plus and (
+                context.in_ann_assign_annotation
+                or context.in_annotation_return_scope
+                or context.in_comprehension_in_ann_assign_annotation
+                or context.in_comprehension_in_annotation_return_scope
+            )
+            if not in_genexp_inner and not in_unevaluated_annotation:
                 raise Invalid
             # in_genexp_inner positions are inside the generator's own implicit
             # function scope.  Annotation-scope restrictions from the surrounding
@@ -1257,14 +1267,17 @@ class StdGenerator(AstGenerator):
             # that does_compile would reject for this reason, and the checker
             # correctly marks such trees as invalid.
             dims = node.dims  # type: ignore[union-attr]
-            has_slice = any(isinstance(d, ast.Slice) for d in dims)
+            # A dim may be Index, Slice, or (illegally) a nested ExtSlice.
+            # Only consider dims that are all ast.Index as "collapsible"; any
+            # Slice or nested ExtSlice means we must keep the outer ExtSlice.
+            all_index = all(isinstance(d, ast.Index) for d in dims)
             if len(dims) <= 1:
                 # 0 dims: keep as Index(Tuple([])) → a[()]
                 # 1 dim : unwrap the ExtSlice wrapper entirely
                 if len(dims) == 0:
                     return ast.Index(value=ast.Tuple(elts=[], ctx=ast.Load()))  # type: ignore[attr-defined]
                 return dims[0]  # Slice(…) or Index(e)
-            if not has_slice:
+            if all_index:
                 # ≥2 all-Index dims: ast.parse("a[x, y]") → Index(Tuple([x, y]))
                 return ast.Index(  # type: ignore[attr-defined]
                     value=ast.Tuple(
@@ -1272,7 +1285,7 @@ class StdGenerator(AstGenerator):
                         ctx=ast.Load(),
                     )
                 )
-            # ≥2 dims with at least one Slice: round-trips correctly, keep as-is.
+            # ≥2 dims with at least one Slice (or nested ExtSlice): keep as-is.
 
         if isinstance(node, ast.ImportFrom):
             if self.use(node.level is None):
