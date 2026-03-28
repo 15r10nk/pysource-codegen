@@ -1426,7 +1426,10 @@ class StdGenerator(AstGenerator):
             if self.use(not py310plus and node.conversion is None):
                 node.conversion = 5
             if self.use(node.conversion not in valid_conversion):
-                node.conversion = valid_conversion[node.conversion % 4]
+                # node.conversion may be None (on 3.10+ None is allowed by the
+                # grammar but was not handled above) — treat None as 0 for the
+                # modulo index.
+                node.conversion = valid_conversion[(node.conversion or 0) % 4]
 
         if hasattr(node, "ctx"):
             if self.use(context.in_delete_target):
