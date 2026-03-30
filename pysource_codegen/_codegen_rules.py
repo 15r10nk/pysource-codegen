@@ -384,11 +384,17 @@ class StdGenerator(AstGenerator):
             # On <3.14, AnnAssign.annotation inside a function body is
             # evaluated inside the function's own scope, so the Python
             # compiler accepts `await` there even for sync functions.
+            # However, this only works when there IS a function frame — at
+            # module level or in a class body await is still a SyntaxError.
             # (arg.annotation and returns are evaluated in the *enclosing*
             # scope — NOT covered here; they always forbid await below.)
-            in_unevaluated_annotation = not py314plus and (
-                context.in_ann_assign_annotation
-                or context.in_comprehension_in_ann_assign_annotation
+            in_unevaluated_annotation = (
+                not py314plus
+                and context.in_function
+                and (
+                    context.in_ann_assign_annotation
+                    or context.in_comprehension_in_ann_assign_annotation
+                )
             )
             if not in_genexp_inner and not in_unevaluated_annotation:
                 raise Invalid
