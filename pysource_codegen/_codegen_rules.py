@@ -1399,9 +1399,10 @@ class StdGenerator(AstGenerator):
                 # If the content then ends with `"` (e.g. value = `'"`),
                 # the close delimiter `"""` creates `""""` which Python parses
                 # as an empty triple-double-quoted string followed by a bare
-                # `"` → SyntaxError.  Strip `"` so astunparse uses a simple
-                # double-quoted f-string where `'` is literal.
-                node.value = node.value.replace('"', "")
+                # `"` → SyntaxError.  Strip only trailing `"` so the value
+                # `"'"` (double-quote then single-quote) stays intact, while
+                # `'"` (ending with double-quote) becomes `'`.
+                node.value = node.value.rstrip('"')
 
             if self.use(
                 (
