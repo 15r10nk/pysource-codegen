@@ -45,8 +45,11 @@ class TestBase(unittest.TestCase):
                 if isinstance(e, ast.AnnAssign) and not e.simple:
                     ann_stmt = ast.Module(
                         body=[
-                            ast.Expr(
-                                copy.deepcopy(e.annotation),
+                            ast.AnnAssign(
+                                target=ast.Name(id="a", ctx=ast.Store()),
+                                annotation=copy.deepcopy(e.annotation),
+                                value=ast.Constant(value=None),
+                                simple=1,
                             )
                         ],
                         type_ignores=[],
