@@ -1405,15 +1405,18 @@ class StdGenerator(AstGenerator):
                 and isinstance(node.value, str)
                 and "'" in node.value
                 and '"' in node.value
+                and '"""' not in node.value
             ):
                 # On <3.9 (astunparse), when the f-string literal constant
                 # contains BOTH single-quote and double-quote characters,
-                # astunparse falls back to a triple-double-quoted f-string.
-                # If the content then ends with `"` (e.g. value = `'"`),
-                # the close delimiter `"""` creates `""""` which Python parses
-                # as an empty triple-double-quoted string followed by a bare
-                # `"` → SyntaxError.  Strip only trailing `"` so the value
-                # `"'"` (double-quote then single-quote) stays intact, while
+                # astunparse uses triple-double-quoted form (f"""...""").
+                # If the content ends with 1 or 2 `"` chars (e.g. `'"`),
+                # those merge with the closing `"""` → SyntaxError or
+                # incorrect round-trip.  When the content contains `"""`,
+                # astunparse automatically switches to triple-SINGLE-quote
+                # form (f'''...''') which handles those values correctly, so
+                # we skip this fix in that case.
+                # Strip only trailing `"` so e.g. `"'"` stays intact while
                 # `'"` (ending with double-quote) becomes `'`.
                 node.value = node.value.rstrip('"')
 
