@@ -381,15 +381,14 @@ class StdGenerator(AstGenerator):
                     )
                 )
             )
-            # On <3.14, annotation expressions are not lazily evaluated, so
-            # await inside AnnAssign.annotation or function/arg annotations is
-            # valid even outside an async function.  (3.14+ makes annotations
-            # lazy code objects, disallowing await there — handled below.)
+            # On <3.14, AnnAssign.annotation inside a function body is
+            # evaluated inside the function's own scope, so the Python
+            # compiler accepts `await` there even for sync functions.
+            # (arg.annotation and returns are evaluated in the *enclosing*
+            # scope — NOT covered here; they always forbid await below.)
             in_unevaluated_annotation = not py314plus and (
                 context.in_ann_assign_annotation
-                or context.in_annotation_return_scope
                 or context.in_comprehension_in_ann_assign_annotation
-                or context.in_comprehension_in_annotation_return_scope
             )
             if not in_genexp_inner and not in_unevaluated_annotation:
                 raise Invalid
@@ -398,15 +397,21 @@ class StdGenerator(AstGenerator):
             # code (e.g. ClassDef.bases/keywords) do not apply there, just as
             # they do not apply inside GeneratorExp.elt (see context_before).
             return None
+        # arg.annotation and FunctionDef/AsyncFunctionDef.returns are always
+        # evaluated in the *enclosing* scope of the function being defined, not
+        # inside the function body.  If the enclosing scope is NOT async, await
+        # is a SyntaxError there (already handled above in the not-in_async_code
+        # branch).  If it IS async (in_async_code=True), await is valid on <3.14
+        # but becomes a SyntaxError on 3.14+ (PEP 649 lazy annotation code objects).
         if py312plus and context.in_type_scope:
             # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
             # default_value): no async function frame exists to await in.
             raise Invalid
         if py314plus and (
             context.in_annotation_return_scope
+            or context.in_comprehension_in_annotation_return_scope
             or context.in_ann_assign_annotation
             or context.in_comprehension_in_ann_assign_annotation
-            or context.in_comprehension_in_annotation_return_scope
         ):
             # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
             # lazy code objects, making await a SyntaxError there.  This also covers
