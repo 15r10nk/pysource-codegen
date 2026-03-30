@@ -859,7 +859,14 @@ class StdGenerator(AstGenerator):
         if not context.in_function:
             raise Invalid
         if context.in_async_code:
-            raise Invalid
+            # yield from is a SyntaxError in async functions, EXCEPT inside
+            # AnnAssign.annotation on <3.14 where annotations are evaluated in
+            # the function's own scope.  (arg.annotation / returns are evaluated
+            # in the enclosing scope, so yield from is invalid there even when
+            # the enclosing scope is async — handled by in_annotation_return_scope
+            # which prevents in_function from being True for those positions.)
+            if not (not py314plus and context.in_ann_assign_annotation):
+                raise Invalid
         if context.in_comprehension:
             # SyntaxError: 'yield' inside list comprehension
             raise Invalid
