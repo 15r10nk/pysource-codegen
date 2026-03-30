@@ -1380,7 +1380,11 @@ class StdGenerator(AstGenerator):
                     # On <3.9 (astunparse), backslashes in f-string literal
                     # constants are not correctly escaped: the output can be
                     # `f'\'` (a SyntaxError) instead of `f'\\'`.
-                    not py39plus
+                    # EXCEPTION: when the value starts with ''' (triple-single-
+                    # quote), astunparse falls back to single-quote form with
+                    # escape sequences (\'  for ' and \\ for \), which handles
+                    # backslashes correctly.
+                    (not py39plus and not node.value.startswith("'''"))
                     # On 3.9–3.11, backslashes inside the *expression* part of
                     # an f-string (`{...}`) are forbidden.  When this JoinedStr
                     # is nested inside a FormattedValue.value, the backslash
