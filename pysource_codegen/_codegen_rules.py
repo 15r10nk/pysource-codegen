@@ -24,6 +24,11 @@ py39plus = (3, 9) <= sys.version_info
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
+py1223plus = (
+    3,
+    12,
+    3,
+) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.12.3
 py313plus = (3, 13) <= sys.version_info
 py314plus = (3, 14) <= sys.version_info
 py315plus = (3, 15) <= sys.version_info
@@ -1401,27 +1406,36 @@ class StdGenerator(AstGenerator):
                 node.value = node.value.replace("\\", "")
 
             if self.use(
-                not py39plus
-                and (
+                (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
                 and isinstance(node.value, str)
                 and "'" in node.value
                 and '"' in node.value
-                and '"""' not in node.value
+                and (
+                    # On <3.9 (astunparse): when content has BOTH ' and " but
+                    # no """, astunparse uses triple-double-quoted outer form
+                    # (f"""...""").  Trailing " chars would merge with the
+                    # closing """ → SyntaxError.  Strip trailing ".
+                    # When content has """, astunparse switches to
+                    # triple-SINGLE-quote form which handles """ correctly, so
+                    # no stripping is needed in that case.
+                    (not py39plus and '"""' not in node.value)
+                    # When content has BOTH ''' and """: no triple-quote form
+                    # works (''' closes triple-single-quote; """ closes
+                    # triple-double-quote).  The fallback escape-sequence mode
+                    # introduces backslashes in f-string expression parts,
+                    # which is forbidden on Python <3.12 and was buggy in
+                    # Python 3.12.0–3.12.2 (ast.unparse generated uncompilable
+                    # source; fixed in 3.12.3).  Strip trailing " to eliminate
+                    # """ so the value (e.g. ''') can be represented with a
+                    # double-quote outer f-string without any escaping.
+                    or (not py1223plus and "'''" in node.value)
+                )
             ):
-                # On <3.9 (astunparse), when the f-string literal constant
-                # contains BOTH single-quote and double-quote characters,
-                # astunparse uses triple-double-quoted form (f"""...""").
-                # If the content ends with 1 or 2 `"` chars (e.g. `'"`),
-                # those merge with the closing `"""` → SyntaxError or
-                # incorrect round-trip.  When the content contains `"""`,
-                # astunparse automatically switches to triple-SINGLE-quote
-                # form (f'''...''') which handles those values correctly, so
-                # we skip this fix in that case.
-                # Strip only trailing `"` so e.g. `"'"` stays intact while
-                # `'"` (ending with double-quote) becomes `'`.
+                # Strip only trailing " so e.g. "'" stays intact while
+                # '" (ending with double-quote) becomes '.
                 node.value = node.value.rstrip('"')
 
             if self.use(
