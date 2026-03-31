@@ -1385,20 +1385,23 @@ class StdGenerator(AstGenerator):
                 and (
                     # On <3.9 (astunparse), backslashes in f-string literal
                     # constants are not always correctly escaped.  Strip them
-                    # unless one of two safe cases applies:
-                    #   (a) the constant is inside a format_spec JoinedStr —
-                    #       there the outer FormattedValue forces astunparse to
-                    #       use double-quote form, so backslashes are fine.
-                    #   (b) the value starts with ''' OR contains both ''' and
-                    #       """ — astunparse then uses escape-sequence mode
-                    #       (single-quote outer with \' and \\), which handles
-                    #       backslashes correctly.
+                    # UNLESS one of these safe cases applies:
+                    #   (a) the value contains BOTH ''' and """ — astunparse
+                    #       uses escape-sequence mode (single-quote outer with
+                    #       \' and \\), which handles backslashes correctly.
+                    #   (b) the constant is in a format_spec JoinedStr AND
+                    #       the value ends with exactly one backslash — e.g.
+                    #       `f'{x!s:\}'` round-trips fine (the trailing `\`
+                    #       before `}` is literal in format specs).  Two or
+                    #       more trailing backslashes fail because `\\` is
+                    #       interpreted as one backslash by the parser.
                     (
                         not py39plus
-                        and parent_node.parent.parent_attr != "format_spec"
+                        and not ("'''" in node.value and '"""' in node.value)
                         and not (
-                            node.value.startswith("'''")
-                            or ("'''" in node.value and '"""' in node.value)
+                            parent_node.parent.parent_attr == "format_spec"
+                            and node.value.endswith("\\")
+                            and not node.value[:-1].endswith("\\")
                         )
                     )
                     # On 3.9–3.11, backslashes inside the *expression* part of
@@ -1414,6 +1417,28 @@ class StdGenerator(AstGenerator):
             ):
                 # Strip backslashes so the tree is always representable.
                 # An empty result is handled by the next (empty → " ") block.
+                node.value = node.value.replace("\\", "")
+
+            if self.use(
+                # On 3.12.0–3.12.2, ast.unparse does not double-escape
+                # backslashes inside format_spec constants: `\n` is emitted
+                # as `\n` (a newline after parsing) rather than `\\n`.
+                # The only safe backslash in a format_spec is a single
+                # trailing one (e.g. `f'{x:\}'`) which Python leaves as a
+                # literal `\}` terminator.  Strip all other backslashes.
+                py312plus
+                and not py1223plus  # 3.12.0–3.12.2 only (3.8 handled by the block above)
+                and (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and parent_node.parent.parent_attr == "format_spec"
+                and isinstance(node.value, str)
+                and "\\" in node.value
+                and not (
+                    node.value.endswith("\\") and not node.value[:-1].endswith("\\")
+                )
+            ):
                 node.value = node.value.replace("\\", "")
 
             if self.use(
