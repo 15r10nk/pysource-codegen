@@ -1517,8 +1517,17 @@ class StdGenerator(AstGenerator):
                             # FormattedValue sibling is safe: astunparse emits
                             # f'...\{expr}' where \{ on Python <3.12 is treated
                             # as a literal backslash and round-trips correctly.
+                            # However this only holds when the prefix (the
+                            # value without the trailing \) itself contains no
+                            # backslash.  If it does, astunparse enters
+                            # escape-sequence mode for the earlier \ chars
+                            # (e.g. \' → escape for apostrophe) and the
+                            # trailing \ is then emitted raw instead of as
+                            # \\, breaking the round-trip (e.g. \'\  →
+                            # f"\'\{x}" → re-parse gives '\ not \'\).
                             node.value.endswith("\\")
                             and not node.value[:-1].endswith("\\")
+                            and "\\" not in node.value[:-1]
                             and parent_node.parent_attr_index is not None
                             and parent_node.parent_attr_index + 1
                             < len(parent_node.parent.node.values)  # type: ignore[union-attr, arg-type]
@@ -1629,6 +1638,7 @@ class StdGenerator(AstGenerator):
                             and not (
                                 mv.endswith("\\")
                                 and not mv[:-1].endswith("\\")
+                                and "\\" not in mv[:-1]
                                 and merged_idx + 1 < len(node.values)
                                 and isinstance(
                                     node.values[merged_idx + 1], ast.FormattedValue
