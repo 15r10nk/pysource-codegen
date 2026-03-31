@@ -1416,6 +1416,10 @@ class StdGenerator(AstGenerator):
                 and '"' in node.value
                 and not py39plus
                 and '"""' not in node.value
+                and not any(
+                    isinstance(v, ast.FormattedValue)
+                    for v in parent_node.parent.node.values  # type: ignore[union-attr]
+                )
             ):
                 # On <3.9 (astunparse): when content has BOTH ' and " but no
                 # """, astunparse uses triple-double-quoted outer form
