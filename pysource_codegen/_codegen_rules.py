@@ -1365,6 +1365,21 @@ class StdGenerator(AstGenerator):
                 node.kind = allowed_kind[hash(node.kind) % len(allowed_kind)]
 
             if self.use(
+                not py312plus
+                and context.fstring_value_depth > 0
+                and isinstance(node.value, bytes)
+                and "\\" in repr(node.value)
+            ):
+                # On <3.12, backslashes are forbidden inside f-string expression
+                # parts ({...}).  ast.unparse renders bytes constants via repr(),
+                # which uses backslash escape sequences for non-printable or
+                # non-ASCII bytes (e.g. b'\x00' → b'\x00').  Such a constant
+                # inside a FormattedValue.value would produce e.g. f"{b'\x00'!s}"
+                # which is a SyntaxError on <3.12.  Replace with a safe bytes
+                # value whose repr() contains no backslash.
+                node.value = b" "
+
+            if self.use(
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
