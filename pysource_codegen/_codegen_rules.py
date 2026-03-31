@@ -1375,51 +1375,6 @@ class StdGenerator(AstGenerator):
                 node.value = str(node.value)
 
             if self.use(
-                not py312plus
-                and (
-                    p_info == ("JoinedStr", "values")
-                    or p_info == ("TemplateStr", "values")
-                )
-                and isinstance(node.value, str)
-                and "\\" in node.value
-                and (
-                    # On <3.9 (astunparse), backslashes in f-string literal
-                    # constants are not always correctly escaped.  Strip them
-                    # UNLESS one of these safe cases applies:
-                    #   (a) the value contains BOTH ''' and """ — astunparse
-                    #       uses escape-sequence mode (single-quote outer with
-                    #       \' and \\), which handles backslashes correctly.
-                    #   (b) the constant is in a format_spec JoinedStr AND
-                    #       the value ends with exactly one backslash — e.g.
-                    #       `f'{x!s:\}'` round-trips fine (the trailing `\`
-                    #       before `}` is literal in format specs).  Two or
-                    #       more trailing backslashes fail because `\\` is
-                    #       interpreted as one backslash by the parser.
-                    (
-                        not py39plus
-                        and not ("'''" in node.value and '"""' in node.value)
-                        and not (
-                            parent_node.parent.parent_attr == "format_spec"
-                            and node.value.endswith("\\")
-                            and not node.value[:-1].endswith("\\")
-                        )
-                    )
-                    # On 3.9–3.11, backslashes inside the *expression* part of
-                    # an f-string (`{...}`) are forbidden.  When this JoinedStr
-                    # is nested inside a FormattedValue.value, the backslash
-                    # ends up in the expression part of the outer f-string and
-                    # ast.unparse raises ValueError('Unable to avoid backslash
-                    # in f-string expression part').
-                    # fstring_value_depth > 0 means we are inside at least one
-                    # FormattedValue.value chain.
-                    or context.fstring_value_depth > 0
-                )
-            ):
-                # Strip backslashes so the tree is always representable.
-                # An empty result is handled by the next (empty → " ") block.
-                node.value = node.value.replace("\\", "")
-
-            if self.use(
                 # On 3.12.0–3.12.2, ast.unparse does not double-escape
                 # backslashes inside format_spec constants: `\n` is emitted
                 # as `\n` (a newline after parsing) rather than `\\n`.
@@ -1427,7 +1382,7 @@ class StdGenerator(AstGenerator):
                 # trailing one (e.g. `f'{x:\}'`) which Python leaves as a
                 # literal `\}` terminator.  Strip all other backslashes.
                 py312plus
-                and not py1223plus  # 3.12.0–3.12.2 only (3.8 handled by the block above)
+                and not py1223plus  # 3.12.0–3.12.2 only (3.8 handled by the block below)
                 and (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
@@ -1477,11 +1432,14 @@ class StdGenerator(AstGenerator):
                     # Case A: this constant is a direct literal sibling of a
                     # FormattedValue in the outer JoinedStr.  On Python <3.9.1
                     # (astunparse on 3.8 and the initial 3.9.0 release),
-                    # escape-sequence mode (triggered by ''' + """) backslash-
-                    # escapes ALL ' in the f-string, including in the expression
-                    # parts of sibling FormattedValues → "f-string expression
-                    # part cannot include a backslash".  Fixed in Python 3.9.1
-                    # (ast.unparse uses triple-single-quote outer form instead).
+                    # escape-sequence mode (triggered by ''' + """) can
+                    # backslash-escape the inner f-string quotes of a sibling
+                    # FormattedValue's expression, producing \' inside {…}
+                    # which Python rejects as "f-string expression part cannot
+                    # include a backslash".  We cannot determine from the
+                    # constant alone whether any sibling FV contains a nested
+                    # f-string, so we conservatively strip """ whenever ''' +
+                    # """ appear with any FV sibling.  Fixed in Python 3.9.1.
                     (
                         not py391plus
                         and any(
@@ -1506,6 +1464,71 @@ class StdGenerator(AstGenerator):
                 # without escape-sequence mode, e.g. '''""" → ''' → the outer
                 # f-string can use double-quote form (f"'''") without escaping.
                 node.value = node.value.replace('"""', "")
+
+            if self.use(
+                not py312plus
+                and (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and isinstance(node.value, str)
+                and "\\" in node.value
+                and (
+                    # On <3.9 (astunparse), backslashes in f-string literal
+                    # constants cause problems.  Strip them UNLESS one of these
+                    # safe cases applies:
+                    #   (a) the value contains BOTH ''' and """ — astunparse
+                    #       uses escape-sequence mode (single-quote outer with
+                    #       \' and \\), which handles backslashes correctly.
+                    #       NOTE: this block runs AFTER the """ strip block above,
+                    #       so if """ was stripped, this exception no longer applies
+                    #       and the backslash will correctly be stripped here.
+                    #   (b) the constant is in a format_spec JoinedStr AND
+                    #       the value ends with exactly one backslash — e.g.
+                    #       `f'{x!s:\}'` round-trips fine (the trailing `\`
+                    #       before `}` is literal in format specs).  Two or
+                    #       more trailing backslashes fail because `\\` is
+                    #       interpreted as one backslash by the parser.
+                    (
+                        not py39plus
+                        and not ("'''" in node.value and '"""' in node.value)
+                        and not (
+                            parent_node.parent.parent_attr == "format_spec"
+                            and node.value.endswith("\\")
+                            and not node.value[:-1].endswith("\\")
+                        )
+                        and not (
+                            # A trailing lone backslash immediately before a
+                            # FormattedValue sibling is safe: astunparse emits
+                            # f'...\{expr}' where \{ on Python <3.12 is treated
+                            # as a literal backslash and round-trips correctly.
+                            node.value.endswith("\\")
+                            and not node.value[:-1].endswith("\\")
+                            and parent_node.parent_attr_index is not None
+                            and parent_node.parent_attr_index + 1
+                            < len(parent_node.parent.node.values)  # type: ignore[union-attr, arg-type]
+                            and isinstance(
+                                parent_node.parent.node.values[  # type: ignore[union-attr, index]
+                                    parent_node.parent_attr_index + 1
+                                ],
+                                ast.FormattedValue,
+                            )
+                        )
+                    )
+                    # On 3.9–3.11, backslashes inside the *expression* part of
+                    # an f-string (`{...}`) are forbidden.  When this JoinedStr
+                    # is nested inside a FormattedValue.value, the backslash
+                    # ends up in the expression part of the outer f-string and
+                    # ast.unparse raises ValueError('Unable to avoid backslash
+                    # in f-string expression part').
+                    # fstring_value_depth > 0 means we are inside at least one
+                    # FormattedValue.value chain.
+                    or context.fstring_value_depth > 0
+                )
+            ):
+                # Strip backslashes so the tree is always representable.
+                # An empty result is handled by the next (empty → " ") block.
+                node.value = node.value.replace("\\", "")
 
             if self.use(
                 (
@@ -1550,6 +1573,57 @@ class StdGenerator(AstGenerator):
                 else:
                     new_values.append(v)
             node.values = new_values
+            # After merging, the combined string values may have new problematic
+            # combinations (e.g. one constant ends with "" and the next starts
+            # with '"' creating a new '"""' sequence, or a merged value has both
+            # ''' and """ which would enable escape-sequence mode in astunparse
+            # — and then a subsequent strip of """ would leave a dangling \).
+            # Re-apply the same strip logic that was applied to each constant
+            # individually to ensure the final merged values are also clean.
+            has_fv_sibling = any(isinstance(v, ast.FormattedValue) for v in node.values)
+            is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
+            for merged_idx, merged in enumerate(node.values):
+                if not isinstance(merged, ast.Constant) or not isinstance(
+                    merged.value, str
+                ):
+                    continue
+                mv = merged.value
+                # Re-apply """ strip
+                if (
+                    "'''" in mv
+                    and '"""' in mv
+                    and (
+                        (not py391plus and has_fv_sibling)
+                        or (not py1223plus and is_in_format_spec)
+                    )
+                ):
+                    merged.value = mv = mv.replace('"""', "")
+                # Re-apply backslash strip (runs AFTER """ strip so condition is correct)
+                if (
+                    not py312plus
+                    and "\\" in mv
+                    and (
+                        (
+                            not py39plus
+                            and not ("'''" in mv and '"""' in mv)
+                            and not (
+                                is_in_format_spec
+                                and mv.endswith("\\")
+                                and not mv[:-1].endswith("\\")
+                            )
+                            and not (
+                                mv.endswith("\\")
+                                and not mv[:-1].endswith("\\")
+                                and merged_idx + 1 < len(node.values)
+                                and isinstance(
+                                    node.values[merged_idx + 1], ast.FormattedValue
+                                )
+                            )
+                        )
+                        or context.fstring_value_depth > 0
+                    )
+                ):
+                    merged.value = mv = mv.replace("\\", "")
 
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
