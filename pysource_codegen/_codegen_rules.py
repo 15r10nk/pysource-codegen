@@ -1384,13 +1384,23 @@ class StdGenerator(AstGenerator):
                 and "\\" in node.value
                 and (
                     # On <3.9 (astunparse), backslashes in f-string literal
-                    # constants are not correctly escaped: the output can be
-                    # `f'\'` (a SyntaxError) instead of `f'\\'`.
-                    # EXCEPTION: when the value starts with ''' (triple-single-
-                    # quote), astunparse falls back to single-quote form with
-                    # escape sequences (\'  for ' and \\ for \), which handles
-                    # backslashes correctly.
-                    (not py39plus and not node.value.startswith("'''"))
+                    # constants are not always correctly escaped.  Strip them
+                    # unless one of two safe cases applies:
+                    #   (a) the constant is inside a format_spec JoinedStr —
+                    #       there the outer FormattedValue forces astunparse to
+                    #       use double-quote form, so backslashes are fine.
+                    #   (b) the value starts with ''' OR contains both ''' and
+                    #       """ — astunparse then uses escape-sequence mode
+                    #       (single-quote outer with \' and \\), which handles
+                    #       backslashes correctly.
+                    (
+                        not py39plus
+                        and parent_node.parent.parent_attr != "format_spec"
+                        and not (
+                            node.value.startswith("'''")
+                            or ("'''" in node.value and '"""' in node.value)
+                        )
+                    )
                     # On 3.9–3.11, backslashes inside the *expression* part of
                     # an f-string (`{...}`) are forbidden.  When this JoinedStr
                     # is nested inside a FormattedValue.value, the backslash
