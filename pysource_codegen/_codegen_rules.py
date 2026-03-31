@@ -21,6 +21,7 @@ from pysource_codegen._generator import NodeRef
 
 py38plus = (3, 8) <= sys.version_info
 py39plus = (3, 9) <= sys.version_info
+py391plus = (3, 9, 1) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.9.1
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
 py312plus = (3, 12) <= sys.version_info
@@ -1413,30 +1414,59 @@ class StdGenerator(AstGenerator):
                 and isinstance(node.value, str)
                 and "'" in node.value
                 and '"' in node.value
+                and not py39plus
+                and '"""' not in node.value
+            ):
+                # On <3.9 (astunparse): when content has BOTH ' and " but no
+                # """, astunparse uses triple-double-quoted outer form
+                # (f"""...""").  If the content ends with 1 or 2 " chars
+                # those merge with the closing """ → SyntaxError.
+                # Strip only trailing " so e.g. "'" stays intact.
+                # (When content has """, astunparse switches to triple-SINGLE-
+                # quote form which handles """ correctly — no stripping needed.)
+                node.value = node.value.rstrip('"')
+
+            if self.use(
+                (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and isinstance(node.value, str)
+                and "'''" in node.value
+                and '"""' in node.value
                 and (
-                    # On <3.9 (astunparse): when content has BOTH ' and " but
-                    # no """, astunparse uses triple-double-quoted outer form
-                    # (f"""...""").  Trailing " chars would merge with the
-                    # closing """ → SyntaxError.  Strip trailing ".
-                    # When content has """, astunparse switches to
-                    # triple-SINGLE-quote form which handles """ correctly, so
-                    # no stripping is needed in that case.
-                    (not py39plus and '"""' not in node.value)
-                    # When content has BOTH ''' and """: no triple-quote form
-                    # works (''' closes triple-single-quote; """ closes
-                    # triple-double-quote).  The fallback escape-sequence mode
-                    # introduces backslashes in f-string expression parts,
-                    # which is forbidden on Python <3.12 and was buggy in
-                    # Python 3.12.0–3.12.2 (ast.unparse generated uncompilable
-                    # source; fixed in 3.12.3).  Strip trailing " to eliminate
-                    # """ so the value (e.g. ''') can be represented with a
-                    # double-quote outer f-string without any escaping.
-                    or (not py1223plus and "'''" in node.value)
+                    # Case A: this constant is a direct literal sibling of a
+                    # FormattedValue in the outer JoinedStr.  On Python <3.9.1
+                    # (astunparse on 3.8 and the initial 3.9.0 release),
+                    # escape-sequence mode (triggered by ''' + """) backslash-
+                    # escapes ALL ' in the f-string, including in the expression
+                    # parts of sibling FormattedValues → "f-string expression
+                    # part cannot include a backslash".  Fixed in Python 3.9.1
+                    # (ast.unparse uses triple-single-quote outer form instead).
+                    (
+                        not py391plus
+                        and any(
+                            isinstance(v, ast.FormattedValue)
+                            for v in parent_node.parent.node.values  # type: ignore[union-attr]
+                        )
+                    )
+                    # Case B: this constant is in a format_spec JoinedStr.
+                    # astunparse (3.8) and Python 3.9–3.12.2's ast.unparse
+                    # both fail when format_spec content has ''' + """: the
+                    # outer JoinedStr ends up in escape-sequence mode (3.8) or
+                    # ast.unparse raises "Unable to avoid backslash" (3.9–3.11)
+                    # or generates uncompilable source (3.12.0–3.12.2, fixed
+                    # in 3.12.3).
+                    or (
+                        not py1223plus
+                        and parent_node.parent.parent_attr == "format_spec"  # type: ignore[union-attr]
+                    )
                 )
             ):
-                # Strip only trailing " so e.g. "'" stays intact while
-                # '" (ending with double-quote) becomes '.
-                node.value = node.value.rstrip('"')
+                # Remove all """ sequences so the value can be represented
+                # without escape-sequence mode, e.g. '''""" → ''' → the outer
+                # f-string can use double-quote form (f"'''") without escaping.
+                node.value = node.value.replace('"""', "")
 
             if self.use(
                 (
