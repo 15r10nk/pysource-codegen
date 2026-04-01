@@ -1511,12 +1511,16 @@ class StdGenerator(AstGenerator):
                     # On <3.9 (astunparse), backslashes in f-string literal
                     # constants cause problems.  Strip them UNLESS one of these
                     # safe cases applies:
-                    #   (a) the value contains BOTH ''' and """ — astunparse
-                    #       uses escape-sequence mode (single-quote outer with
-                    #       \' and \\), which handles backslashes correctly.
-                    #       NOTE: this block runs AFTER the """ strip block above,
-                    #       so if """ was stripped, this exception no longer applies
-                    #       and the backslash will correctly be stripped here.
+                    #   (a) any constant in this JoinedStr contains BOTH ''' and
+                    #       """ — astunparse uses escape-sequence mode for the
+                    #       entire JoinedStr (single-quote outer with \' and \\),
+                    #       so ALL backslashes in ALL constants round-trip fine.
+                    #       Escape-seq mode is a JoinedStr-wide decision, not
+                    #       per-constant.  NOTE: this block runs AFTER the """
+                    #       strip above, so if """ was stripped from the
+                    #       triggering constant (because a sibling FV had a
+                    #       nested JoinedStr), escape-seq mode is gone and
+                    #       backslashes are correctly stripped.
                     #   (b) the constant is in a format_spec JoinedStr AND
                     #       the value ends with exactly one backslash — e.g.
                     #       `f'{x!s:\}'` round-trips fine (the trailing `\`
@@ -1525,7 +1529,13 @@ class StdGenerator(AstGenerator):
                     #       interpreted as one backslash by the parser.
                     (
                         not py39plus
-                        and not ("'''" in node.value and '"""' in node.value)
+                        and not any(
+                            isinstance(v, ast.Constant)
+                            and isinstance(v.value, str)
+                            and "'''" in v.value
+                            and '"""' in v.value
+                            for v in parent_node.parent.node.values  # type: ignore[union-attr]
+                        )
                         and not (
                             parent_node.parent.parent_attr == "format_spec"
                             and node.value.endswith("\\")
@@ -1652,7 +1662,13 @@ class StdGenerator(AstGenerator):
                     and (
                         (
                             not py39plus
-                            and not ("'''" in mv and '"""' in mv)
+                            and not any(
+                                isinstance(w, ast.Constant)
+                                and isinstance(w.value, str)
+                                and "'''" in w.value
+                                and '"""' in w.value
+                                for w in node.values
+                            )
                             and not (
                                 is_in_format_spec
                                 and mv.endswith("\\")
