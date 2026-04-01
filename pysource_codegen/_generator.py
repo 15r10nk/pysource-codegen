@@ -121,6 +121,14 @@ class Context:
     # value.  Meaningful only when in_ann_assign_target is True.  Requires that
     # attr_order generates AnnAssign.value before AnnAssign.target.
     ann_assign_has_value: bool = False
+    # True when inside AsyncFunctionDef.body (transitively through comprehensions),
+    # cleared at FunctionDef/Lambda/ClassDef body boundaries.  Unlike in_async_context,
+    # this flag is NEVER cleared when entering comprehension nodes on any Python version.
+    # Used to distinguish "in_async_code because of AsyncFunctionDef" from
+    # "in_async_code because of GeneratorExp.elt": the latter should NOT propagate
+    # into nested DictComp/SetComp/ListComp scopes (which are their own function
+    # objects and are not async unless their first comprehension uses `async for`).
+    in_async_function_scope: bool = False
 
     def copy(self) -> Context:
         new = Context.__new__(Context)

@@ -922,8 +922,26 @@ class StdGenerator(AstGenerator):
                 ("TypeVarTuple", "default_value"),
                 ("ParamSpec", "default_value"),
             )
+            # DictComp/SetComp/ListComp each create their own implicit function scope.
+            # If in_async_code was set by GeneratorExp.elt (not by an actual
+            # AsyncFunctionDef), that flag must NOT flow into these nested scopes
+            # on Python <3.11: `await` inside their comprehensions is only valid when
+            # an async function frame is actually present on those versions (SyntaxError:
+            # "asynchronous comprehension outside of an asynchronous function").
+            # On 3.11+, CPython relaxed the restriction and allows await in
+            # nested comprehensions inside GeneratorExp.elt even without an async
+            # function frame, so we only apply this clearing on <3.11.
+            or (not ctx.in_async_function_scope and not py311plus and node_type in ("DictComp", "SetComp", "ListComp"))
         ):
             ctx.in_async_code = False
+
+        # --- in_async_function_scope: True inside AsyncFunctionDef.body, persists
+        #     through comprehension boundaries (unlike in_async_context on 3.8-3.10).
+        #     Used above to gate in_async_code propagation into nested comprehensions.
+        if node_type == "AsyncFunctionDef" and attr == "body":
+            ctx.in_async_function_scope = True
+        elif attr == "body" and node_type in ("FunctionDef", "Lambda", "ClassDef"):
+            ctx.in_async_function_scope = False
 
         # --- in_async_context (stricter: only AsyncFunctionDef.body activates) ---
         if node_type == "AsyncFunctionDef" and attr == "body":
