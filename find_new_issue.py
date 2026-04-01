@@ -1,7 +1,6 @@
 # /// script
 # dependencies = [
 #   "rich",
-#   ".",
 # ]
 # ///
 from __future__ import annotations
