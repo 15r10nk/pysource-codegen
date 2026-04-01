@@ -1726,7 +1726,19 @@ class StdGenerator(AstGenerator):
                         # emitted unescaped, which closes the f-string
                         # prematurely → SyntaxError.  Python 3.11.6 fixed this
                         # by switching to ''' outer in this situation.
-                        or (py391plus and not py1116plus and more_squotes_than_dquotes)
+                        # Guard: only when a FormattedValue sibling is present.
+                        # If the JoinedStr has ONLY Constant children ast.unparse
+                        # always uses ' outer (escape-sequence mode works fine),
+                        # so no stripping is needed for the constants-only case.
+                        or (
+                            py391plus
+                            and not py1116plus
+                            and more_squotes_than_dquotes
+                            and any(
+                                isinstance(v, ast.FormattedValue)
+                                for v in node.values  # type: ignore[union-attr]
+                            )
+                        )
                     )
                 ):
                     merged.value = mv = mv.replace('"""', "")
