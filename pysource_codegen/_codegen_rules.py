@@ -1652,11 +1652,24 @@ class StdGenerator(AstGenerator):
             # """ in a literal is not escaped and closes the f-string early
             # (→ SyntaxError).  Fixed in 3.11 (which switches to ''' outer).
             # Pre-compute once; used by the per-constant """ strip below.
-            combined_literals = "".join(
+            # Include chars from format_spec constants of FV children: the
+            # unparser counts ALL literal chars (including format_spec) when
+            # choosing the outer delimiter, not just top-level constants.
+            _format_spec_parts: list[str] = []
+            for _v in node.values:  # type: ignore[union-attr]
+                if isinstance(_v, ast.FormattedValue) and isinstance(
+                    _v.format_spec, ast.JoinedStr
+                ):
+                    for _n in ast.walk(_v.format_spec):
+                        if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
+                            _format_spec_parts.append(_n.value)
+            _format_spec_literal = "".join(_format_spec_parts)
+            _top_level_literal = "".join(
                 v.value
-                for v in node.values
+                for v in node.values  # type: ignore[union-attr]
                 if isinstance(v, ast.Constant) and isinstance(v.value, str)
             )
+            combined_literals = _top_level_literal + _format_spec_literal
             more_squotes_than_dquotes = combined_literals.count("'") > combined_literals.count('"')
             is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
             for merged_idx, merged in enumerate(node.values):
@@ -1751,39 +1764,57 @@ class StdGenerator(AstGenerator):
                 ):
                     merged.value = mv = mv.replace("\\", "")
 
-            # Post-loop: handle ''' / """ in SEPARATE constants on 3.9.1–3.11.5.
+            # Post-loop: handle ''' / """ in SEPARATE constants on 3.9.1–3.11.5
+            # and (when a format_spec is involved) on 3.12.0–3.12.2.
             # The per-constant loop above only strips """ from constants that
             # have BOTH ''' and """ (using escape-sequence mode).  When ''' and
-            # """ live in different constants neither triggers escape-sequence
-            # mode; the unparser picks an outer form that conflicts with one of
-            # the triple-quote sequences, producing a premature close.
-            # We fix this by stripping ''' from single-type ''' constants and
-            # """ from single-type """ constants.
+            # """ live in different constants (or at different levels — one in
+            # a format_spec, one in the outer JoinedStr) neither triggers
+            # escape-sequence mode; the unparser picks an outer form that
+            # conflicts with one of the triple-quote sequences.
             # Guard: if any constant already has BOTH, the unparser enters
             # escape-sequence mode for the entire f-string and round-trips
             # correctly — skip in that case.
-            if py391plus and not py1116plus:
+            # Covers:
+            #   py391plus and not py1116plus  → 3.9.1–3.11.5 (any arrangement)
+            #   py312plus and not py1223plus  → 3.12.0–3.12.2, but ONLY when
+            #     a format_spec constant is involved (3.12.x handles same-level
+            #     ''' + """ correctly but still fails to escape ''' inside
+            #     format_spec when a single-quote outer form is chosen).
+            _format_spec_involved = bool(
+                "'''" in _format_spec_literal or '"""' in _format_spec_literal
+            )
+            if (py391plus and not py1116plus) or (
+                py312plus and not py1223plus and _format_spec_involved
+            ):
+                # Collect all string Constant nodes: top-level AND any inside
+                # format_spec sub-JoinedStrs (the unparser counts their chars
+                # when deciding the outer delimiter).
+                _all_str_consts: list[ast.Constant] = []
+                for _v in node.values:  # type: ignore[union-attr]
+                    if isinstance(_v, ast.Constant) and isinstance(_v.value, str):
+                        _all_str_consts.append(_v)
+                    elif isinstance(_v, ast.FormattedValue) and isinstance(
+                        _v.format_spec, ast.JoinedStr
+                    ):
+                        for _n in ast.walk(_v.format_spec):
+                            if isinstance(_n, ast.Constant) and isinstance(
+                                _n.value, str
+                            ):
+                                _all_str_consts.append(_n)
                 any_const_has_both = any(
-                    isinstance(v, ast.Constant)
-                    and isinstance(v.value, str)
-                    and "'''" in v.value
-                    and '"""' in v.value
-                    for v in node.values  # type: ignore[union-attr]
+                    "'''" in c.value and '"""' in c.value for c in _all_str_consts
                 )
                 if (
                     not any_const_has_both
                     and "'''" in combined_literals
                     and '"""' in combined_literals
                 ):
-                    for const_node in node.values:  # type: ignore[union-attr]
-                        if (
-                            isinstance(const_node, ast.Constant)
-                            and isinstance(const_node.value, str)
-                        ):
-                            if "'''" in const_node.value and '"""' not in const_node.value:
-                                const_node.value = const_node.value.replace("'''", "")
-                            elif '"""' in const_node.value and "'''" not in const_node.value:
-                                const_node.value = const_node.value.replace('"""', "")
+                    for const_node in _all_str_consts:
+                        if "'''" in const_node.value and '"""' not in const_node.value:
+                            const_node.value = const_node.value.replace("'''", "")
+                        elif '"""' in const_node.value and "'''" not in const_node.value:
+                            const_node.value = const_node.value.replace('"""', "")
 
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
