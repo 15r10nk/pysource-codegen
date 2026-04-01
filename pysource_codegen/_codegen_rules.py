@@ -24,6 +24,7 @@ py39plus = (3, 9) <= sys.version_info
 py391plus = (3, 9, 1) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.9.1
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
+py1116plus = (3, 11, 6) <= sys.version_info  # ast.unparse f-string ''' outer quoting fixed in 3.11.6
 py312plus = (3, 12) <= sys.version_info
 py1223plus = (
     3,
@@ -1646,6 +1647,17 @@ class StdGenerator(AstGenerator):
                 )
                 for v in node.values
             )
+            # On Python 3.9.1–3.10.x, ast.unparse picks '"' outer when the
+            # combined literal content has more ' than ".  With '"' outer the
+            # """ in a literal is not escaped and closes the f-string early
+            # (→ SyntaxError).  Fixed in 3.11 (which switches to ''' outer).
+            # Pre-compute once; used by the per-constant """ strip below.
+            combined_literals = "".join(
+                v.value
+                for v in node.values
+                if isinstance(v, ast.Constant) and isinstance(v.value, str)
+            )
+            more_squotes_than_dquotes = combined_literals.count("'") > combined_literals.count('"')
             is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
             for merged_idx, merged in enumerate(node.values):
                 if not isinstance(merged, ast.Constant) or not isinstance(
@@ -1695,6 +1707,13 @@ class StdGenerator(AstGenerator):
                     and (
                         (not py391plus and has_fv_sibling)
                         or (not py1223plus and is_in_format_spec)
+                        # Case C: On Python 3.9.1–3.11.5, ast.unparse chooses
+                        # '"' outer when combined literal content has more ' than
+                        # ".  With '"' outer the '"""' in a literal constant is
+                        # emitted unescaped, which closes the f-string
+                        # prematurely → SyntaxError.  Python 3.11.6 fixed this
+                        # by switching to ''' outer in this situation.
+                        or (py391plus and not py1116plus and more_squotes_than_dquotes)
                     )
                 ):
                     merged.value = mv = mv.replace('"""', "")
