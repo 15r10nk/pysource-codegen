@@ -1463,17 +1463,21 @@ class StdGenerator(AstGenerator):
                     # FormattedValue in the outer JoinedStr.  On Python <3.9.1
                     # (astunparse on 3.8 and the initial 3.9.0 release),
                     # escape-sequence mode (triggered by ''' + """) can
-                    # backslash-escape the inner f-string quotes of a sibling
-                    # FormattedValue's expression, producing \' inside {…}
-                    # which Python rejects as "f-string expression part cannot
-                    # include a backslash".  We cannot determine from the
-                    # constant alone whether any sibling FV contains a nested
-                    # f-string, so we conservatively strip """ whenever ''' +
-                    # """ appear with any FV sibling.  Fixed in Python 3.9.1.
+                    # backslash-escape the quotes of a nested JoinedStr
+                    # (f-string) inside a sibling FormattedValue's expression,
+                    # producing \' inside {…} which Python rejects as
+                    # "f-string expression part cannot include a backslash".
+                    # Only strip """ when a sibling FV actually contains a
+                    # nested JoinedStr — plain expressions (Dict, Name, …)
+                    # have no quote characters to escape.  Fixed in 3.9.1.
                     (
                         not py391plus
                         and any(
                             isinstance(v, ast.FormattedValue)
+                            and any(
+                                isinstance(n, ast.JoinedStr)
+                                for n in ast.walk(v.value)
+                            )
                             for v in parent_node.parent.node.values  # type: ignore[union-attr]
                         )
                     )
@@ -1619,7 +1623,11 @@ class StdGenerator(AstGenerator):
             # — and then a subsequent strip of """ would leave a dangling \).
             # Re-apply the same strip logic that was applied to each constant
             # individually to ensure the final merged values are also clean.
-            has_fv_sibling = any(isinstance(v, ast.FormattedValue) for v in node.values)
+            has_fv_sibling = any(
+                isinstance(v, ast.FormattedValue)
+                and any(isinstance(n, ast.JoinedStr) for n in ast.walk(v.value))
+                for v in node.values
+            )
             is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
             for merged_idx, merged in enumerate(node.values):
                 if not isinstance(merged, ast.Constant) or not isinstance(
