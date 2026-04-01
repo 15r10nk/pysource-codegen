@@ -1450,30 +1450,6 @@ class StdGenerator(AstGenerator):
                     or p_info == ("TemplateStr", "values")
                 )
                 and isinstance(node.value, str)
-                and "'" in node.value
-                and '"' in node.value
-                and not py39plus
-                and '"""' not in node.value
-                and not any(
-                    isinstance(v, ast.FormattedValue)
-                    for v in parent_node.parent.node.values  # type: ignore[union-attr]
-                )
-            ):
-                # On <3.9 (astunparse): when content has BOTH ' and " but no
-                # """, astunparse uses triple-double-quoted outer form
-                # (f"""...""").  If the content ends with 1 or 2 " chars
-                # those merge with the closing """ → SyntaxError.
-                # Strip only trailing " so e.g. "'" stays intact.
-                # (When content has """, astunparse switches to triple-SINGLE-
-                # quote form which handles """ correctly — no stripping needed.)
-                node.value = node.value.rstrip('"')
-
-            if self.use(
-                (
-                    p_info == ("JoinedStr", "values")
-                    or p_info == ("TemplateStr", "values")
-                )
-                and isinstance(node.value, str)
                 and "'''" in node.value
                 and '"""' in node.value
                 and (
@@ -1656,6 +1632,20 @@ class StdGenerator(AstGenerator):
                 and any(isinstance(n, ast.JoinedStr) for n in ast.walk(v.value))
                 for v in node.values
             )
+            # Whether any FV sibling's expression contains a str Constant whose
+            # repr() uses ' outer (value has no ').  When combined with a literal
+            # that ends with ", astunparse chooses """ outer form where the
+            # trailing " + """ = """" → SyntaxError.
+            has_fv_str_const = any(
+                isinstance(v, ast.FormattedValue)
+                and any(
+                    isinstance(n, ast.Constant)
+                    and isinstance(n.value, str)
+                    and "'" not in n.value
+                    for n in ast.walk(v.value)
+                )
+                for v in node.values
+            )
             is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
             for merged_idx, merged in enumerate(node.values):
                 if not isinstance(merged, ast.Constant) or not isinstance(
@@ -1663,6 +1653,41 @@ class StdGenerator(AstGenerator):
                 ):
                     continue
                 mv = merged.value
+                # Re-apply trailing-" strip.
+                # On <3.9 (astunparse), a constant whose last characters are at
+                # the very END of the f-string content (no FormattedValue after
+                # it) and that ends with " will produce """" when the closing
+                # """ is appended, which Python lexes as """ (close) + stray "
+                # → SyntaxError.  Strip only when:
+                #   - no FV comes after this constant (it is the terminal literal)
+                #   - astunparse would choose """ outer form, which happens when
+                #     the f-string content has both ' and " (from the literal or
+                #     from FV expression strings rendered with ' outer by repr)
+                no_fv_after = not any(
+                    isinstance(node.values[j], ast.FormattedValue)
+                    for j in range(merged_idx + 1, len(node.values))
+                )
+                if (
+                    '"' in mv
+                    and '"""' not in mv
+                    and no_fv_after
+                    and (
+                        # On <3.9 (astunparse), content that has both ' and "
+                        # (but no """) causes astunparse to pick """ outer form.
+                        # A trailing " in the last literal + closing """ = """"
+                        # → SyntaxError.
+                        (not py39plus and "'" in mv)
+                        # On <3.9.1 (astunparse + early ast.unparse), when a
+                        # sibling FV expression uses str constants repr'd with
+                        # ' outer (value has no '), the unparsers can't choose
+                        # " outer (literal ends in ") and instead try ' outer
+                        # — but then must escape ' inside the expression as \'
+                        # which is forbidden in pre-3.12 f-string expressions.
+                        # Fixed in 3.9.1.
+                        or (not py391plus and has_fv_str_const)
+                    )
+                ):
+                    merged.value = mv = mv.rstrip('"')
                 # Re-apply """ strip
                 if (
                     "'''" in mv
