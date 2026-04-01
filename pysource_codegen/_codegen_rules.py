@@ -1380,6 +1380,21 @@ class StdGenerator(AstGenerator):
                 node.value = b" "
 
             if self.use(
+                not py312plus
+                and context.fstring_value_depth > 0
+                and isinstance(node.value, str)
+                and "\\" in repr(node.value)
+            ):
+                # Same as the bytes case above, but for str constants.
+                # ast.unparse renders str constants via their repr, using
+                # backslash escape sequences for characters like \, \n, \t,
+                # \x00, etc. (e.g. '\\' → '\\\\', '\n' → '\\n').  A string
+                # constant with such a value inside a FormattedValue.value
+                # produces e.g. f"{'\\\\' !s}" which is a SyntaxError on <3.12.
+                # Replace with a safe string whose repr() contains no backslash.
+                node.value = " "
+
+            if self.use(
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
