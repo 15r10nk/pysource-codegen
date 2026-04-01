@@ -53,6 +53,20 @@ def try_seed(i: int) -> tuple[str, str] | None:
 
 
 if __name__ == "__main__":
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"], capture_output=True, text=True
+    )
+    if dirty.stdout.strip():
+        print("Uncommitted changes detected — commit or stash them first.")
+        print(dirty.stdout)
+        raise SystemExit(1)
+
+    print("Running run_all.py to check for existing bugs...")
+    pre_check = subprocess.run(["uv", "run", "run_all.py"])
+    if pre_check.returncode != 0:
+        print("Existing bugs detected — fix them before searching for new ones.")
+        raise SystemExit(pre_check.returncode)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Test only one seed value")
     parser.add_argument(

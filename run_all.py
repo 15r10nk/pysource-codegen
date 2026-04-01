@@ -149,13 +149,14 @@ for i in range(max_rows):
             row.append("")
     table.add_row(*row)
 
+
+errors = sorted(k for k, v in results.items() if v != 0)
 console = Console()
-console.print(table)
 
-error_count = sum(v != 0 for v in results.values())
-
-if error_count:
-    print(f"FAIL: {error_count} configurations failed")
-    print(f"FAIL: {sorted(k for k,v in results.items()if v !=0)}")
-
-exit(1 if error_count else 0)
+if errors:
+    console.print(table)
+    console.print(f"[red]FAIL: {len(errors)} configurations failed")
+    console.print(f"[red]FAIL: {errors}")
+    exit(1)
+else:
+    console.print(f"[green]PASS: tests passed")
