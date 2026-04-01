@@ -1751,6 +1751,40 @@ class StdGenerator(AstGenerator):
                 ):
                     merged.value = mv = mv.replace("\\", "")
 
+            # Post-loop: handle ''' / """ in SEPARATE constants on 3.9.1–3.11.5.
+            # The per-constant loop above only strips """ from constants that
+            # have BOTH ''' and """ (using escape-sequence mode).  When ''' and
+            # """ live in different constants neither triggers escape-sequence
+            # mode; the unparser picks an outer form that conflicts with one of
+            # the triple-quote sequences, producing a premature close.
+            # We fix this by stripping ''' from single-type ''' constants and
+            # """ from single-type """ constants.
+            # Guard: if any constant already has BOTH, the unparser enters
+            # escape-sequence mode for the entire f-string and round-trips
+            # correctly — skip in that case.
+            if py391plus and not py1116plus:
+                any_const_has_both = any(
+                    isinstance(v, ast.Constant)
+                    and isinstance(v.value, str)
+                    and "'''" in v.value
+                    and '"""' in v.value
+                    for v in node.values  # type: ignore[union-attr]
+                )
+                if (
+                    not any_const_has_both
+                    and "'''" in combined_literals
+                    and '"""' in combined_literals
+                ):
+                    for const_node in node.values:  # type: ignore[union-attr]
+                        if (
+                            isinstance(const_node, ast.Constant)
+                            and isinstance(const_node.value, str)
+                        ):
+                            if "'''" in const_node.value and '"""' not in const_node.value:
+                                const_node.value = const_node.value.replace("'''", "")
+                            elif '"""' in const_node.value and "'''" not in const_node.value:
+                                const_node.value = const_node.value.replace('"""', "")
+
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
             if self.use(not py310plus and node.conversion is None):
