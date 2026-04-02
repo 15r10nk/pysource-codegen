@@ -2477,6 +2477,17 @@ class StdGenerator(AstGenerator):
                         )
                     else:
                         return ast.Pass()
+                if py314plus:
+                    # PEP 649 (3.14+): AnnAssign.annotation is a lazy code
+                    # object evaluated in its own scope, not in the enclosing
+                    # one.  Names referenced only inside the annotation are NOT
+                    # "used" in the enclosing scope and therefore must not
+                    # prevent a subsequent `global`/`nonlocal` declaration for
+                    # the same name.  Only visit target and value.
+                    self.visit(node.target)
+                    if node.value is not None:
+                        self.visit(node.value)
+                    return node
                 return self.generic_visit(node)
 
             def visit_FunctionDef(
