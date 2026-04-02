@@ -14,6 +14,7 @@ from ._utils import only_firstone
 from ._utils import unique_by
 from ._utils import walk_childs_first
 from ._utils import walk_function_nodes
+from ._utils import walk_until
 from pysource_codegen._generator import AstGenerator
 from pysource_codegen._generator import Context
 from pysource_codegen._generator import Invalid
@@ -2327,6 +2328,54 @@ class StdGenerator(AstGenerator):
                     # truncates 'str' at '!'.  Removing format_spec avoids the
                     # round-trip failure (t'{0 != 0}' round-trips correctly).
                     n.format_spec = None
+
+        # Detect non-async FunctionDef bodies that become implicit async
+        # generators: they contain both a yield/yield-from expression AND
+        # an `await` inside an AnnAssign.annotation.  On pre-3.14 the
+        # annotation is evaluated in the function's own scope, so the
+        # compiler sees both `yield` and `await` and promotes the function
+        # to an async generator — even without `async def`.  Async
+        # generators do not permit `return <value>` (SyntaxError: 'return'
+        # with value in async generator); strip any return value.
+        # On 3.14+ (PEP 649) `await` in an annotation is already a
+        # SyntaxError, so probability_try_Await never allows it there;
+        # no FunctionDef can become an implicit async generator that way.
+        if not py314plus:
+            _func_boundaries = (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+                ast.Lambda,
+                ast.ClassDef,
+            )
+            for funcnode in ast.walk(node):
+                if not isinstance(funcnode, ast.FunctionDef):
+                    continue
+                # Check for yield/yield-from in the direct body scope
+                if not any(
+                    isinstance(n, (ast.Yield, ast.YieldFrom))
+                    for n in walk_until(funcnode.body, _func_boundaries)
+                    if isinstance(n, ast.AST)
+                ):
+                    continue
+                # Check for await inside any AnnAssign.annotation in the
+                # direct body scope (annotations evaluated in function scope
+                # on pre-3.14)
+                if not any(
+                    isinstance(n, ast.Await)
+                    for stmt in funcnode.body
+                    if isinstance(stmt, ast.AnnAssign)
+                    for n in walk_until(stmt.annotation, _func_boundaries)
+                    if isinstance(n, ast.AST)
+                ):
+                    continue
+                # Implicit async generator: strip 'return <value>'
+                for n in walk_until(funcnode.body, _func_boundaries):  # type: ignore[arg-type]
+                    if (
+                        isinstance(n, ast.Return)
+                        and n.value is not None
+                        and self.use(True)
+                    ):
+                        n.value = None
 
         return self.fix_nonlocal(node)
 
