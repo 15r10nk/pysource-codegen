@@ -1483,9 +1483,46 @@ class StdGenerator(AstGenerator):
                     # ast.unparse raises "Unable to avoid backslash" (3.9–3.11)
                     # or generates uncompilable source (3.12.0–3.12.2, fixed
                     # in 3.12.3).
+                    # Two distinct failure modes require different guards:
+                    #   3.12.0–3.12.2 (py312plus and not py1223plus): ast.unparse
+                    #     emits ''' unescaped in the format spec; Python's tokenizer
+                    #     then treats ''' as starting a triple-quoted string and
+                    #     raises "unterminated triple-quoted string literal" for
+                    #     ANY FV value expression → always strip.
+                    #   pre-3.12 (not py312plus): astunparse / ast.unparse uses
+                    #     escape-sequence mode, backslash-escaping ALL ' in the
+                    #     entire output — including expression parts.  The error
+                    #     ("backslash in f-string expression" / "Unable to avoid
+                    #     backslash") only arises when the FV value expression
+                    #     itself renders with ' chars (str/bytes constants or
+                    #     nested JoinedStr).  Plain Name/int/etc. values have no
+                    #     ' chars to escape → safe to keep '''""".
                     or (
-                        not py1223plus
-                        and parent_node.parent.parent_attr == "format_spec"  # type: ignore[union-attr]
+                        parent_node.parent.parent_attr == "format_spec"  # type: ignore[union-attr]
+                        and parent_node.parent.parent is not None  # type: ignore[union-attr]
+                        and isinstance(
+                            parent_node.parent.parent.node,  # type: ignore[union-attr]
+                            ast.FormattedValue,
+                        )
+                        and (
+                            # 3.12.0–3.12.2: tokenizer bug — always strip.
+                            (py312plus and not py1223plus)
+                            # pre-3.12: escape-sequence mode — strip only when
+                            # the FV value renders with ' chars.
+                            or (
+                                not py312plus
+                                and any(
+                                    (
+                                        isinstance(n, ast.Constant)
+                                        and isinstance(n.value, (str, bytes))
+                                    )
+                                    or isinstance(n, ast.JoinedStr)
+                                    for n in ast.walk(
+                                        parent_node.parent.parent.node.value  # type: ignore[union-attr]
+                                    )
+                                )
+                            )
+                        )
                     )
                 )
             ):
@@ -1719,7 +1756,41 @@ class StdGenerator(AstGenerator):
                     and '"""' in mv
                     and (
                         (not py391plus and has_fv_sibling)
-                        or (not py1223plus and is_in_format_spec)
+                        # Case B: On all pre-3.12.3 versions, when a format_spec
+                        # JoinedStr constant has both ''' and """, unparsing fails.
+                        # Two distinct failure modes (see Constant-level Case B
+                        # comment above for full explanation):
+                        #   3.12.0–3.12.2: tokenizer bug — always strip.
+                        #   pre-3.12: escape-sequence mode — strip only when the
+                        #     FV value expression renders with ' chars (str/bytes
+                        #     constants or nested JoinedStr).
+                        or (
+                            is_in_format_spec
+                            and parent_node.parent is not None  # type: ignore[union-attr]
+                            and isinstance(
+                                parent_node.parent.node,  # type: ignore[union-attr]
+                                ast.FormattedValue,
+                            )
+                            and (
+                                # 3.12.0–3.12.2: tokenizer bug — always strip.
+                                (py312plus and not py1223plus)
+                                # pre-3.12: escape-sequence mode — strip only when
+                                # the FV value renders with ' chars.
+                                or (
+                                    not py312plus
+                                    and any(
+                                        (
+                                            isinstance(n, ast.Constant)
+                                            and isinstance(n.value, (str, bytes))
+                                        )
+                                        or isinstance(n, ast.JoinedStr)
+                                        for n in ast.walk(
+                                            parent_node.parent.node.value  # type: ignore[union-attr]
+                                        )
+                                    )
+                                )
+                            )
+                        )
                         # Case C: On Python 3.9.1–3.11.5, ast.unparse chooses
                         # '"' outer when combined literal content has more ' than
                         # ".  With '"' outer the '"""' in a literal constant is
