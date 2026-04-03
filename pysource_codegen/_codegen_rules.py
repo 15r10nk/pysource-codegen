@@ -2357,12 +2357,13 @@ class StdGenerator(AstGenerator):
                     if isinstance(n, ast.AST)
                 ):
                     continue
-                # Check for await inside any AnnAssign.annotation in the
-                # direct body scope (annotations evaluated in function scope
-                # on pre-3.14)
+                # Check for await inside any AnnAssign.annotation anywhere
+                # in the direct body scope — including those nested inside
+                # While/If/Try/With/etc. (annotations evaluated in function
+                # scope on pre-3.14)
                 if not any(
                     isinstance(n, ast.Await)
-                    for stmt in funcnode.body
+                    for stmt in walk_until(funcnode.body, _func_boundaries)
                     if isinstance(stmt, ast.AnnAssign)
                     for n in walk_until(stmt.annotation, _func_boundaries)
                     if isinstance(n, ast.AST)
