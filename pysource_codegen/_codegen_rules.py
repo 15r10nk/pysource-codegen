@@ -2684,7 +2684,7 @@ class StdGenerator(AstGenerator):
                         self.name_assigned(node.rest)
                     return self.generic_visit(node)
 
-            if sys.version_info >= (3, 13):
+            if sys.version_info >= (3, 10):
 
                 def visit_MatchStar(self, node: ast.MatchStar):
                     if node.name:
