@@ -483,6 +483,9 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
+        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+            # SyntaxError('Cannot use comprehension in annotation scope within class scope')
+            raise Invalid
         return None
 
     def probability_try_Expr(
@@ -538,6 +541,9 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
+        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+            # SyntaxError('Cannot use comprehension in annotation scope within class scope')
+            raise Invalid
         return None
 
     def probability_try_Interpolation(
@@ -581,7 +587,9 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and context.in_type_alias_in_class and sys.version_info < (3, 13):
+        if py312plus and (
+            context.in_type_alias_in_class or context.in_typed_func_annotation_in_class
+        ) and sys.version_info < (3, 13):
             # SyntaxError('Cannot use lambda in annotation scope within class scope')
             raise Invalid
         return None
@@ -610,6 +618,9 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
+        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+            # SyntaxError('Cannot use comprehension in annotation scope within class scope')
+            raise Invalid
         return None
 
     def probability_try_MatchStar(
@@ -732,6 +743,9 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
+        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+            # SyntaxError('Cannot use comprehension in annotation scope within class scope')
+            raise Invalid
         return None
 
     def probability_try_Slice(
@@ -1105,7 +1119,46 @@ class StdGenerator(AstGenerator):
         elif is_function_def:
             ctx.in_type_alias_in_class = False
 
-        # --- in_ann_assign_target: inside AnnAssign.target ---
+        # --- in_typed_func_annotation_in_class: inside the annotation scope (returns /
+        #     arg.annotation) of a type-parameterized function inside a ClassDef.
+        #     Requires attr_order to generate type_params before args/returns so that
+        #     node.node.type_params is already populated when we visit those attrs.
+        #     On 3.12 (not 3.13+), comprehensions and lambdas in these positions raise
+        #     SyntaxError ("Cannot use comprehension/lambda in annotation scope within
+        #     class scope").
+        #     Cleared at function/lambda/class body and comprehension elt/key/value
+        #     boundaries (same clearing points as in_annotation_return_scope). ---
+        if (node_type, attr) in (
+            ("FunctionDef", "returns"),
+            ("AsyncFunctionDef", "returns"),
+        ) and ctx.in_class_not_function and getattr(node.node, "type_params", []):
+            ctx.in_typed_func_annotation_in_class = True
+        elif (node_type, attr) == ("arg", "annotation") and ctx.in_class_not_function:
+            # node.parent = arguments NodeRef, node.parent.parent = FunctionDef NodeRef.
+            # attr_order guarantees type_params is generated before args, so
+            # node.parent.parent.node.type_params is already populated here.
+            parent = node.parent
+            func_node = (
+                parent.parent.node
+                if parent is not None and parent.parent is not None
+                else None
+            )
+            ctx.in_typed_func_annotation_in_class = bool(
+                func_node is not None and getattr(func_node, "type_params", [])
+            )
+        elif (node_type, attr) in (
+            ("GeneratorExp", "elt"),
+            ("ListComp", "elt"),
+            ("SetComp", "elt"),
+            ("DictComp", "key"),
+            ("DictComp", "value"),
+        ) or (
+            attr == "body"
+            and node_type in ("FunctionDef", "AsyncFunctionDef", "Lambda", "ClassDef")
+        ):
+            ctx.in_typed_func_annotation_in_class = False
+
+
         ctx.in_ann_assign_target = node_type == "AnnAssign" and attr == "target"
         # Since attr_order generates AnnAssign.value before AnnAssign.target,
         # node.node.value is already set at this point.  Capture it so the
@@ -2809,6 +2862,12 @@ class StdGenerator(AstGenerator):
             result = [n for n in field_names if n != "value"]
             result.insert(result.index("target"), "value")
             return result
+        if ast_type_name in ("FunctionDef", "AsyncFunctionDef") and "type_params" in field_names:
+            # Generate 'type_params' before 'args' and 'returns' so that context_before
+            # for those attrs can inspect node.node.type_params and know whether
+            # comprehensions/lambdas in annotation positions are forbidden (3.12 only,
+            # "Cannot use comprehension/lambda in annotation scope within class scope").
+            return ["type_params"] + [n for n in field_names if n != "type_params"]
         return field_names
 
     def same_length(self) -> dict[str, list[str]]:
