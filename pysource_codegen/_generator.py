@@ -120,12 +120,13 @@ class Context:
     # True when inside AnnAssign.target and the AnnAssign already has a non-None
     # value.  Meaningful only when in_ann_assign_target is True.  Requires that
     # attr_order generates AnnAssign.value before AnnAssign.target.
-    ann_assign_has_value: bool = False    # True inside FunctionDef.returns, AsyncFunctionDef.returns, or arg.annotation of a
-    # type-parameterized function (has type_params) nested inside a ClassDef.
-    # On Python 3.12 (not 3.13+), comprehensions and lambdas in these annotation positions
-    # raise SyntaxError ("Cannot use comprehension/lambda in annotation scope within class
-    # scope").  Requires attr_order to generate type_params before args/returns for
-    # FunctionDef/AsyncFunctionDef.
+    ann_assign_has_value: bool = False    # True inside FunctionDef.returns, AsyncFunctionDef.returns, arg.annotation of a
+    # type-parameterized function, OR ClassDef.bases/ClassDef.keywords of a
+    # type-parameterized class, when the function/class is nested inside a ClassDef.
+    # On Python 3.12 (not 3.13+), comprehensions and lambdas in these annotation
+    # positions raise SyntaxError ("Cannot use comprehension/lambda in annotation scope
+    # within class scope").  Requires attr_order to generate type_params before
+    # args/returns/bases/keywords for FunctionDef/AsyncFunctionDef/ClassDef.
     # Cleared at function/lambda/class body and comprehension elt/key/value boundaries.
     in_typed_func_annotation_in_class: bool = False    # True when inside AsyncFunctionDef.body (transitively through comprehensions),
     # cleared at FunctionDef/Lambda/ClassDef body boundaries.  Unlike in_async_context,

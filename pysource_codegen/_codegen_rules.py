@@ -483,7 +483,10 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+        if py312plus and sys.version_info < (3, 13) and (
+            context.in_typed_func_annotation_in_class
+            or (context.in_type_scope and context.in_class_not_function)
+        ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
         return None
@@ -541,7 +544,10 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+        if py312plus and sys.version_info < (3, 13) and (
+            context.in_typed_func_annotation_in_class
+            or (context.in_type_scope and context.in_class_not_function)
+        ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
         return None
@@ -587,9 +593,11 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and (
-            context.in_type_alias_in_class or context.in_typed_func_annotation_in_class
-        ) and sys.version_info < (3, 13):
+        if py312plus and sys.version_info < (3, 13) and (
+            context.in_type_alias_in_class
+            or context.in_typed_func_annotation_in_class
+            or (context.in_type_scope and context.in_class_not_function)
+        ):
             # SyntaxError('Cannot use lambda in annotation scope within class scope')
             raise Invalid
         return None
@@ -618,7 +626,10 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+        if py312plus and sys.version_info < (3, 13) and (
+            context.in_typed_func_annotation_in_class
+            or (context.in_type_scope and context.in_class_not_function)
+        ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
         return None
@@ -743,7 +754,10 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and context.in_typed_func_annotation_in_class and sys.version_info < (3, 13):
+        if py312plus and sys.version_info < (3, 13) and (
+            context.in_typed_func_annotation_in_class
+            or (context.in_type_scope and context.in_class_not_function)
+        ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
         return None
@@ -1120,17 +1134,27 @@ class StdGenerator(AstGenerator):
             ctx.in_type_alias_in_class = False
 
         # --- in_typed_func_annotation_in_class: inside the annotation scope (returns /
-        #     arg.annotation) of a type-parameterized function inside a ClassDef.
-        #     Requires attr_order to generate type_params before args/returns so that
-        #     node.node.type_params is already populated when we visit those attrs.
+        #     arg.annotation, bases, keywords) of a type-parameterized function or class
+        #     inside a ClassDef.  Covers:
+        #       - FunctionDef/AsyncFunctionDef.returns when the function has type_params
+        #       - arg.annotation when the enclosing function has type_params
+        #       - ClassDef.bases / ClassDef.keywords when the class has type_params
+        #     Requires attr_order to generate type_params first so node.node.type_params
+        #     is already populated when we visit those attrs.
         #     On 3.12 (not 3.13+), comprehensions and lambdas in these positions raise
         #     SyntaxError ("Cannot use comprehension/lambda in annotation scope within
-        #     class scope").
+        #     class scope").  See also: in_type_scope + in_class_not_function (covers
+        #     TypeAlias.value and TypeVar.bound/default_value in class scope).
         #     Cleared at function/lambda/class body and comprehension elt/key/value
         #     boundaries (same clearing points as in_annotation_return_scope). ---
         if (node_type, attr) in (
             ("FunctionDef", "returns"),
             ("AsyncFunctionDef", "returns"),
+        ) and ctx.in_class_not_function and getattr(node.node, "type_params", []):
+            ctx.in_typed_func_annotation_in_class = True
+        elif (node_type, attr) in (
+            ("ClassDef", "bases"),
+            ("ClassDef", "keywords"),
         ) and ctx.in_class_not_function and getattr(node.node, "type_params", []):
             ctx.in_typed_func_annotation_in_class = True
         elif (node_type, attr) == ("arg", "annotation") and ctx.in_class_not_function:
@@ -2862,11 +2886,12 @@ class StdGenerator(AstGenerator):
             result = [n for n in field_names if n != "value"]
             result.insert(result.index("target"), "value")
             return result
-        if ast_type_name in ("FunctionDef", "AsyncFunctionDef") and "type_params" in field_names:
-            # Generate 'type_params' before 'args' and 'returns' so that context_before
-            # for those attrs can inspect node.node.type_params and know whether
-            # comprehensions/lambdas in annotation positions are forbidden (3.12 only,
-            # "Cannot use comprehension/lambda in annotation scope within class scope").
+        if ast_type_name in ("FunctionDef", "AsyncFunctionDef", "ClassDef") and "type_params" in field_names:
+            # Generate 'type_params' before 'args', 'returns', 'bases', 'keywords' so
+            # that context_before for those attrs can inspect node.node.type_params and
+            # know whether comprehensions/lambdas in annotation positions are forbidden
+            # (3.12 only, "Cannot use comprehension/lambda in annotation scope within
+            # class scope").
             return ["type_params"] + [n for n in field_names if n != "type_params"]
         return field_names
 
