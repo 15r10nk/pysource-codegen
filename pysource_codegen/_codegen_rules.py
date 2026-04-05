@@ -1533,25 +1533,78 @@ class StdGenerator(AstGenerator):
                 and '"""' in node.value
                 and (
                     # Case A: this constant is a direct literal sibling of a
-                    # FormattedValue in the outer JoinedStr.  On Python <3.9.1
-                    # (astunparse on 3.8 and the initial 3.9.0 release),
-                    # escape-sequence mode (triggered by ''' + """) can
-                    # backslash-escape the quotes of a nested JoinedStr
-                    # (f-string) inside a sibling FormattedValue's expression,
-                    # producing \' inside {…} which Python rejects as
-                    # "f-string expression part cannot include a backslash".
-                    # Only strip """ when a sibling FV actually contains a
-                    # nested JoinedStr — plain expressions (Dict, Name, …)
-                    # have no quote characters to escape.  Fixed in 3.9.1.
+                    # FormattedValue in the outer JoinedStr.  On Python <3.12,
+                    # when ''' + """ triggers escape-sequence mode (pre-3.9.1)
+                    # or when the unparser picks a quote form that places """ or
+                    # a backslash-escaped inner f-string inside an expression:
+                    #   <3.9.1  (astunparse / 3.9.0): escape-sequence mode →
+                    #     inner JoinedStr gets \' inside {…} → SyntaxError
+                    #     "f-string expression part cannot include a backslash".
+                    #   3.9.1–3.11.5: double-quote outer chosen, """ in literal
+                    #     prematurely closes the f-string → SyntaxError.
+                    #   3.11.6–3.11.x: triple-single-quote outer chosen, inner
+                    #     JoinedStr gets \' inside {…} → same backslash error.
+                    #   3.12+: ast.unparse handles this correctly.
+                    # Strip """ so the constant no longer triggers escape-seq
+                    # mode; without """ the unparser can freely choose a quote
+                    # form that avoids conflicts.  Only strip when a sibling FV
+                    # actually contains a nested JoinedStr — plain expressions
+                    # (Dict, Name, …) have no quote characters to escape.
                     (
-                        not py391plus
-                        and any(
-                            isinstance(v, ast.FormattedValue)
-                            and any(
-                                isinstance(n, ast.JoinedStr)
-                                for n in ast.walk(v.value)
+                        not py312plus
+                        and parent_node.parent_attr_index is not None
+                        and (
+                            # pre-3.9.1 (astunparse): escape-sequence mode
+                            # applies regardless of the constant's position in
+                            # values — ANY constant with ''' + """ that sits in
+                            # a JoinedStr containing a FV with a nested JoinedStr
+                            # will trigger a backslash-in-expression error.
+                            # Strip ''' whenever any sibling FV has a nested
+                            # JoinedStr, no matter whether the FV comes before
+                            # or after this constant.
+                            (
+                                not py391plus
+                                and any(
+                                    isinstance(v, ast.FormattedValue)
+                                    and any(
+                                        isinstance(n, ast.JoinedStr)
+                                        for n in ast.walk(v.value)
+                                    )
+                                    for v in parent_node.parent.node.values  # type: ignore[union-attr]
+                                )
                             )
-                            for v in parent_node.parent.node.values  # type: ignore[union-attr]
+                            # 3.9.1–3.11.x: ast.unparse picks the outer quote
+                            # form based on the first "interesting" content it
+                            # encounters.  The conflict only arises when this
+                            # constant is the LEADING literal (no FV before it),
+                            # because then the ''' + """ in the constant forces a
+                            # quote choice that later breaks the inner JoinedStr
+                            # expression.  When a FV precedes the constant,
+                            # ast.unparse picks its outer form based on the FV
+                            # content, which avoids the conflict.
+                            or (
+                                py391plus
+                                # Guard: this constant must be the leading literal
+                                # (no FV before it).
+                                and not any(
+                                    isinstance(v, ast.FormattedValue)
+                                    for v in parent_node.parent.node.values[  # type: ignore[union-attr, index]
+                                        : parent_node.parent_attr_index
+                                    ]
+                                )
+                                # Guard: only strip when the conflicting FV
+                                # (nested JoinedStr) comes AFTER this constant.
+                                and any(
+                                    isinstance(v, ast.FormattedValue)
+                                    and any(
+                                        isinstance(n, ast.JoinedStr)
+                                        for n in ast.walk(v.value)
+                                    )
+                                    for v in parent_node.parent.node.values[  # type: ignore[union-attr, index]
+                                        parent_node.parent_attr_index + 1 :
+                                    ]
+                                )
+                            )
                         )
                     )
                     # Case B: this constant is in a format_spec JoinedStr.
@@ -1743,11 +1796,6 @@ class StdGenerator(AstGenerator):
             # — and then a subsequent strip of """ would leave a dangling \).
             # Re-apply the same strip logic that was applied to each constant
             # individually to ensure the final merged values are also clean.
-            has_fv_sibling = any(
-                isinstance(v, ast.FormattedValue)
-                and any(isinstance(n, ast.JoinedStr) for n in ast.walk(v.value))
-                for v in node.values
-            )
             # Whether any FV sibling's expression contains a str Constant whose
             # repr() uses ' outer (value has no ').  When combined with a literal
             # that ends with ", astunparse chooses """ outer form where the
@@ -1833,7 +1881,46 @@ class StdGenerator(AstGenerator):
                     "'''" in mv
                     and '"""' in mv
                     and (
-                        (not py391plus and has_fv_sibling)
+                        # Case A (post-loop): mirrors the per-constant Case A
+                        # above.  Catches constants produced by merging adjacent
+                        # Constant siblings into a combined ''' + """ value.
+                        (
+                            not py312plus
+                            and (
+                                # pre-3.9.1 (astunparse): position-agnostic —
+                                # strip whenever any FV in values has a nested
+                                # JoinedStr.
+                                (
+                                    not py391plus
+                                    and any(
+                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
+                                        and any(
+                                            isinstance(n, ast.JoinedStr)
+                                            for n in ast.walk(node.values[j].value)  # type: ignore[union-attr, index]
+                                        )
+                                        for j in range(len(node.values))  # type: ignore[arg-type]
+                                    )
+                                )
+                                # 3.9.1–3.11.x: only strip when this is the
+                                # leading literal and a FV with nested JoinedStr
+                                # comes after.
+                                or (
+                                    py391plus
+                                    and not any(
+                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
+                                        for j in range(merged_idx)
+                                    )
+                                    and any(
+                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
+                                        and any(
+                                            isinstance(n, ast.JoinedStr)
+                                            for n in ast.walk(node.values[j].value)  # type: ignore[union-attr, index]
+                                        )
+                                        for j in range(merged_idx + 1, len(node.values))  # type: ignore[arg-type]
+                                    )
+                                )
+                            )
+                        )
                         # Case B: On all pre-3.12.3 versions, when a format_spec
                         # JoinedStr constant has both ''' and """, unparsing fails.
                         # Two distinct failure modes (see Constant-level Case B
