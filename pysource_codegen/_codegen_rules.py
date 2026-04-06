@@ -1505,9 +1505,15 @@ class StdGenerator(AstGenerator):
                 # On 3.12.0–3.12.2, ast.unparse does not double-escape
                 # backslashes inside format_spec constants: `\n` is emitted
                 # as `\n` (a newline after parsing) rather than `\\n`.
-                # The only safe backslash in a format_spec is a single
-                # trailing one (e.g. `f'{x:\}'`) which Python leaves as a
-                # literal `\}` terminator.  Strip all other backslashes.
+                # The only safe backslashes in a format_spec are:
+                #   - a single trailing one (e.g. `f'{x:\}'`)
+                #   - backslashes before ' or " (quote-escaping backslashes):
+                #     these are sanitized away by does_compile's quote-stripping
+                #     so they don't cause round-trip failures
+                #   - backslashes before another backslash (\\ pair): these
+                #     round-trip correctly as \\ → \\.
+                # Strip only backslashes before other characters (e.g. \n, \t,
+                # \x, \0, etc.) which do NOT round-trip on 3.12.0–3.12.2.
                 py312plus
                 and not py1223plus  # 3.12.0–3.12.2 only (3.8 handled by the block below)
                 and (
@@ -1516,12 +1522,24 @@ class StdGenerator(AstGenerator):
                 )
                 and parent_node.parent.parent_attr == "format_spec"
                 and isinstance(node.value, str)
-                and "\\" in node.value
-                and not (
-                    node.value.endswith("\\") and not node.value[:-1].endswith("\\")
+                and any(
+                    c == "\\" and node.value[j + 1 : j + 2] not in ("'", '"', "\\", "")
+                    for j, c in enumerate(node.value)
                 )
             ):
-                node.value = node.value.replace("\\", "")
+                # Strip only backslashes NOT followed by ', ", or another \.
+                chars = list(node.value)
+                result_chars = []
+                i = 0
+                while i < len(chars):
+                    if chars[i] == "\\" and (
+                        i + 1 >= len(chars) or chars[i + 1] not in ("'", '"', "\\")
+                    ):
+                        i += 1  # skip this backslash
+                    else:
+                        result_chars.append(chars[i])
+                        i += 1
+                node.value = "".join(result_chars)
 
             if self.use(
                 (
@@ -1671,63 +1689,54 @@ class StdGenerator(AstGenerator):
                 and isinstance(node.value, str)
                 and "\\" in node.value
                 and (
-                    # On <3.9 (astunparse), backslashes in f-string literal
-                    # constants cause problems.  Strip them UNLESS one of these
-                    # safe cases applies:
-                    #   (a) any constant in this JoinedStr contains BOTH ''' and
-                    #       """ — astunparse uses escape-sequence mode for the
-                    #       entire JoinedStr (single-quote outer with \' and \\),
-                    #       so ALL backslashes in ALL constants round-trip fine.
-                    #       Escape-seq mode is a JoinedStr-wide decision, not
-                    #       per-constant.  NOTE: this block runs AFTER the """
-                    #       strip above, so if """ was stripped from the
-                    #       triggering constant (because a sibling FV had a
-                    #       nested JoinedStr), escape-seq mode is gone and
-                    #       backslashes are correctly stripped.
-                    #   (b) the constant is in a format_spec JoinedStr AND
-                    #       the value ends with exactly one backslash — e.g.
-                    #       `f'{x!s:\}'` round-trips fine (the trailing `\`
-                    #       before `}` is literal in format specs).  Two or
-                    #       more trailing backslashes fail because `\\` is
-                    #       interpreted as one backslash by the parser.
                     (
                         not py39plus
-                        and not any(
-                            isinstance(v, ast.Constant)
-                            and isinstance(v.value, str)
-                            and "'''" in v.value
-                            and '"""' in v.value
-                            for v in parent_node.parent.node.values  # type: ignore[union-attr]
-                        )
-                        and not (
-                            parent_node.parent.parent_attr == "format_spec"
-                            and node.value.endswith("\\")
-                            and not node.value[:-1].endswith("\\")
-                        )
-                        and not (
-                            # A trailing lone backslash immediately before a
-                            # FormattedValue sibling is safe: astunparse emits
-                            # f'...\{expr}' where \{ on Python <3.12 is treated
-                            # as a literal backslash and round-trips correctly.
-                            # However this only holds when the prefix (the
-                            # value without the trailing \) itself contains no
-                            # backslash.  If it does, astunparse enters
-                            # escape-sequence mode for the earlier \ chars
-                            # (e.g. \' → escape for apostrophe) and the
-                            # trailing \ is then emitted raw instead of as
-                            # \\, breaking the round-trip (e.g. \'\  →
-                            # f"\'\{x}" → re-parse gives '\ not \'\).
-                            node.value.endswith("\\")
-                            and not node.value[:-1].endswith("\\")
-                            and "\\" not in node.value[:-1]
-                            and parent_node.parent_attr_index is not None
-                            and parent_node.parent_attr_index + 1
-                            < len(parent_node.parent.node.values)  # type: ignore[union-attr, arg-type]
-                            and isinstance(
-                                parent_node.parent.node.values[  # type: ignore[union-attr, index]
-                                    parent_node.parent_attr_index + 1
-                                ],
-                                ast.FormattedValue,
+                        and (
+                            # Lone trailing \ (odd trailing count) with no FV
+                            # immediately after: astunparse renders \' or \"
+                            # which escapes the closing delimiter → unterminated
+                            # string → compile error.
+                            # Exception A: in a format_spec JoinedStr, a trailing
+                            # lone \ appears before } (not before the closing
+                            # quote) → safe, don't strip.
+                            # Exception B: trailing \ with FV immediately after
+                            # → astunparse emits \{...} which is valid pre-3.12.
+                            (
+                                node.value.endswith("\\")
+                                and (
+                                    len(node.value) - len(node.value.rstrip("\\"))
+                                ) % 2 == 1
+                                and not (
+                                    # Exception A: format_spec context
+                                    parent_node.parent is not None  # type: ignore[union-attr]
+                                    and parent_node.parent.parent_attr  # type: ignore[union-attr]
+                                    == "format_spec"
+                                    and not node.value[:-1].endswith("\\")
+                                )
+                                and not (
+                                    # Exception B: trailing before FV
+                                    parent_node.parent_attr_index is not None
+                                    and parent_node.parent_attr_index + 1
+                                    < len(parent_node.parent.node.values)  # type: ignore[union-attr, arg-type]
+                                    and isinstance(
+                                        parent_node.parent.node.values[  # type: ignore[union-attr, index]
+                                            parent_node.parent_attr_index + 1
+                                        ],
+                                        ast.FormattedValue,
+                                    )
+                                )
+                            )
+                            # Or \ before a char that is not another \, ', or
+                            # ": astunparse renders it as a recognized escape
+                            # sequence (\ before n → newline escape etc.) →
+                            # parse-back changes the value → round-trip failure.
+                            # (Trailing \ positions where the next char is empty
+                            # are excluded here; they are handled above.)
+                            or any(
+                                node.value[j + 1 : j + 2]
+                                not in ("'", '"', "\\", "")
+                                for j, c in enumerate(node.value)
+                                if c == "\\"
                             )
                         )
                     )
@@ -1985,25 +1994,30 @@ class StdGenerator(AstGenerator):
                     and (
                         (
                             not py39plus
-                            and not any(
-                                isinstance(w, ast.Constant)
-                                and isinstance(w.value, str)
-                                and "'''" in w.value
-                                and '"""' in w.value
-                                for w in node.values
-                            )
-                            and not (
-                                is_in_format_spec
-                                and mv.endswith("\\")
-                                and not mv[:-1].endswith("\\")
-                            )
-                            and not (
-                                mv.endswith("\\")
-                                and not mv[:-1].endswith("\\")
-                                and "\\" not in mv[:-1]
-                                and merged_idx + 1 < len(node.values)
-                                and isinstance(
-                                    node.values[merged_idx + 1], ast.FormattedValue
+                            and (
+                                # Lone trailing \\ (odd count) with no FV next
+                                (
+                                    mv.endswith("\\")
+                                    and (len(mv) - len(mv.rstrip("\\")))
+                                    % 2 == 1
+                                    and not (
+                                        is_in_format_spec
+                                        and not mv[:-1].endswith("\\")
+                                    )
+                                    and not (
+                                        merged_idx + 1 < len(node.values)  # type: ignore[union-attr, arg-type]
+                                        and isinstance(
+                                            node.values[merged_idx + 1],  # type: ignore[union-attr, index]
+                                            ast.FormattedValue,
+                                        )
+                                    )
+                                )
+                                # Or \\ before non-quote, non-backslash char
+                                or any(
+                                    mv[j + 1 : j + 2]
+                                    not in ("'", '"', "\\", "")
+                                    for j, c in enumerate(mv)
+                                    if c == "\\"
                                 )
                             )
                         )

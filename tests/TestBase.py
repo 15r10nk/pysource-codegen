@@ -28,10 +28,16 @@ class TestBase(unittest.TestCase):
     def does_compile(self, tree: ast.Module) -> bool:
         ast.fix_missing_locations(tree)
         try:
+            # check that the ast structure is equal to the structure which would be used by ast.parse
             new_tree = copy.deepcopy(tree)
             for e in ast.walk(new_tree):
                 if hasattr(e, "type_ignores"):
                     e.type_ignores = []
+                if isinstance(e,ast.Constant):
+                    if isinstance(e.value,str):
+                        e.value=e.value.replace("'","_").replace("\"","_")
+                    if isinstance(e.value,bytes):
+                        e.value=e.value.replace(b"'",b"_").replace(b"\"",b"_")
             if not equal_ast(
                 ast.parse(unparse(new_tree)), new_tree, self.addDetail, "tree"
             ):
