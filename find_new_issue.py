@@ -1,7 +1,11 @@
 # /// script
 # dependencies = [
+#   "ast-decompiler",
 #   "rich",
 # ]
+#
+# [tool.uv.sources]
+# ast-decompiler = { path = "vendor/ast_decompiler" }
 # ///
 from __future__ import annotations
 
