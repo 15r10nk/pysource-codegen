@@ -120,7 +120,9 @@ class Context:
     # True when inside AnnAssign.target and the AnnAssign already has a non-None
     # value.  Meaningful only when in_ann_assign_target is True.  Requires that
     # attr_order generates AnnAssign.value before AnnAssign.target.
-    ann_assign_has_value: bool = False    # True inside FunctionDef.returns, AsyncFunctionDef.returns, arg.annotation of a
+    ann_assign_has_value: bool = (
+        False  # True inside FunctionDef.returns, AsyncFunctionDef.returns, arg.annotation of a
+    )
     # type-parameterized function, OR ClassDef.bases/ClassDef.keywords of a
     # type-parameterized class, when the function/class is nested inside a ClassDef.
     # On Python 3.12 (not 3.13+), comprehensions and lambdas in these annotation
@@ -128,7 +130,9 @@ class Context:
     # within class scope").  Requires attr_order to generate type_params before
     # args/returns/bases/keywords for FunctionDef/AsyncFunctionDef/ClassDef.
     # Cleared at function/lambda/class body and comprehension elt/key/value boundaries.
-    in_typed_func_annotation_in_class: bool = False    # True when inside AsyncFunctionDef.body (transitively through comprehensions),
+    in_typed_func_annotation_in_class: bool = (
+        False  # True when inside AsyncFunctionDef.body (transitively through comprehensions),
+    )
     # cleared at FunctionDef/Lambda/ClassDef body boundaries.  Unlike in_async_context,
     # this flag is NEVER cleared when entering comprehension nodes on any Python version.
     # Used to distinguish "in_async_code because of AsyncFunctionDef" from
@@ -362,7 +366,7 @@ class AstGenerator:
         stop: bool,
         context: Context,
     ) -> None:
-        new_result = info.ast_type()
+        new_result = info.ast_type.__new__(info.ast_type)
         new_node = place(new_result)
 
         attr_length = self.attr_length_provider(new_node)

@@ -5,7 +5,7 @@ from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
 
-assert sys.version_info >= (3, 8)
+assert sys.version_info >= (3, 9)
 
 type_infos = {
     "Delete": NodeType(
@@ -450,4 +450,14 @@ if sys.version_info >= (3, 9):
             "ctx": ("expr_context", ""),
         },
         ast_type=ast.Subscript,
+    )
+
+if sys.version_info >= (3, 15):
+    type_infos["DictComp"] = NodeType(
+        fields={
+            "key": ("expr", ""),
+            "value": ("expr", "?"),
+            "generators": ("comprehension", "*"),
+        },
+        ast_type=ast.DictComp,
     )

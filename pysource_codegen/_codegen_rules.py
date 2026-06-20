@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import ast
-import itertools
 import sys
 from typing import Callable
 from typing import Iterable
-from typing import Sequence
 
 from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
@@ -21,22 +19,9 @@ from pysource_codegen._generator import Context
 from pysource_codegen._generator import Invalid
 from pysource_codegen._generator import NodeRef
 
-py38plus = (3, 8) <= sys.version_info
-py39plus = (3, 9) <= sys.version_info
-py391plus = (3, 9, 1) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.9.1
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
-py1116plus = (
-    3,
-    11,
-    6,
-) <= sys.version_info  # ast.unparse f-string ''' outer quoting fixed in 3.11.6
 py312plus = (3, 12) <= sys.version_info
-py1223plus = (
-    3,
-    12,
-    3,
-) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.12.3
 py313plus = (3, 13) <= sys.version_info
 py314plus = (3, 14) <= sys.version_info
 py315plus = (3, 15) <= sys.version_info
@@ -49,10 +34,7 @@ if sys.version_info >= (3, 14):
 
 
 def all_args(args: ast.arguments) -> tuple[list[ast.arg], ...]:
-    if py38plus:
-        return (args.posonlyargs, args.args, args.kwonlyargs)
-    else:
-        return (args.args, args.kwonlyargs)
+    return (args.posonlyargs, args.args, args.kwonlyargs)
 
 
 if sys.version_info >= (3, 10):
@@ -278,36 +260,6 @@ class StdGenerator(AstGenerator):
             if child_name not in ("Name", "Attribute"):
                 raise Invalid
 
-        if not py39plus:
-            parents = node.all_parents()
-            if any(p[1] == "decorator_list" for p in parents):
-                # restricted decorators
-                # see https://peps.python.org/pep-0614/
-
-                deco_parents = list(
-                    itertools.takewhile(
-                        lambda a: a[1] != "decorator_list", reversed(parents)
-                    )
-                )[::-1]
-
-                def valid_deco_parents(parents: Sequence[tuple[str, str]]) -> bool:
-                    # Call?,Attribute*
-                    parents = list(parents)
-                    if parents and parents[0] == ("Call", "func"):
-                        parents.pop(0)
-                    return all(p == ("Attribute", "value") for p in parents)
-
-                # At the top of decorator_list, Call and Attribute are also
-                # valid (e.g. @name() or @name.attr).  Inside Call.func /
-                # Attribute.value chains only Name and Attribute are allowed.
-                allowed_deco = (
-                    {"Name", "Attribute", "Call"}
-                    if not deco_parents
-                    else {"Name", "Attribute"}
-                )
-                if valid_deco_parents(deco_parents) and child_name not in allowed_deco:
-                    raise Invalid
-
         # type alias
         if py312plus:
             if p_info == ("TypeAlias", "name") and child_name != "Name":
@@ -469,8 +421,6 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if not py38plus and context.in_finally:
-            raise Invalid
         if not context.in_loop:
             raise Invalid
         if context.in_trystar_handler:
@@ -1418,7 +1368,7 @@ class StdGenerator(AstGenerator):
         if self.use(hasattr(ast, "ExtSlice") and isinstance(node, ast.ExtSlice)):
             # ExtSlice only round-trips when it has ≥2 dims AND at least one is a
             # Slice.  ast.parse(ast.unparse(…)) otherwise returns a different node
-            # type:
+            # node kind:
             #   ExtSlice([Index(e)])        → unparse "a[e]"     → parse Index(e)
             #   ExtSlice([Slice(a,b)])      → unparse "a[a:b]"   → parse Slice(a,b)
             #   ExtSlice([Index(x),Index(y)])→ unparse "a[x, y]" → parse Index(Tuple)
@@ -1540,185 +1490,6 @@ class StdGenerator(AstGenerator):
                 node.value = str(node.value)
 
             if self.use(
-                # On 3.12.0–3.12.2, ast.unparse does not double-escape
-                # backslashes inside format_spec constants: `\n` is emitted
-                # as `\n` (a newline after parsing) rather than `\\n`.
-                # The only safe backslashes in a format_spec are:
-                #   - a single trailing one (e.g. `f'{x:\}'`)
-                #   - backslashes before ' or " (quote-escaping backslashes):
-                #     these are sanitized away by does_compile's quote-stripping
-                #     so they don't cause round-trip failures
-                #   - backslashes before another backslash (\\ pair): these
-                #     round-trip correctly as \\ → \\.
-                # Strip only backslashes before other characters (e.g. \n, \t,
-                # \x, \0, etc.) which do NOT round-trip on 3.12.0–3.12.2.
-                py312plus
-                and not py1223plus  # 3.12.0–3.12.2 only (3.8 handled by the block below)
-                and (
-                    p_info == ("JoinedStr", "values")
-                    or p_info == ("TemplateStr", "values")
-                )
-                and parent_node.parent.parent_attr == "format_spec"
-                and isinstance(node.value, str)
-                and any(
-                    c == "\\" and node.value[j + 1 : j + 2] not in ("'", '"', "\\", "")
-                    for j, c in enumerate(node.value)
-                )
-            ):
-                # Strip only backslashes NOT followed by ', ", or another \.
-                chars = list(node.value)
-                result_chars = []
-                i = 0
-                while i < len(chars):
-                    if chars[i] == "\\" and (
-                        i + 1 >= len(chars) or chars[i + 1] not in ("'", '"', "\\")
-                    ):
-                        i += 1  # skip this backslash
-                    else:
-                        result_chars.append(chars[i])
-                        i += 1
-                node.value = "".join(result_chars)
-
-            if self.use(
-                (
-                    p_info == ("JoinedStr", "values")
-                    or p_info == ("TemplateStr", "values")
-                )
-                and isinstance(node.value, str)
-                and "'''" in node.value
-                and '"""' in node.value
-                and (
-                    # Case A: this constant is a direct literal sibling of a
-                    # FormattedValue in the outer JoinedStr.  On Python <3.12,
-                    # when ''' + """ triggers escape-sequence mode (pre-3.9.1)
-                    # or when the unparser picks a quote form that places """ or
-                    # a backslash-escaped inner f-string inside an expression:
-                    #   <3.9.1  (astunparse / 3.9.0): escape-sequence mode →
-                    #     inner JoinedStr gets \' inside {…} → SyntaxError
-                    #     "f-string expression part cannot include a backslash".
-                    #   3.9.1–3.11.5: double-quote outer chosen, """ in literal
-                    #     prematurely closes the f-string → SyntaxError.
-                    #   3.11.6–3.11.x: triple-single-quote outer chosen, inner
-                    #     JoinedStr gets \' inside {…} → same backslash error.
-                    #   3.12+: ast.unparse handles this correctly.
-                    # Strip """ so the constant no longer triggers escape-seq
-                    # mode; without """ the unparser can freely choose a quote
-                    # form that avoids conflicts.  Only strip when a sibling FV
-                    # actually contains a nested JoinedStr — plain expressions
-                    # (Dict, Name, …) have no quote characters to escape.
-                    (
-                        not py312plus
-                        and parent_node.parent_attr_index is not None
-                        and (
-                            # pre-3.9.1 (astunparse): escape-sequence mode
-                            # applies regardless of the constant's position in
-                            # values — ANY constant with ''' + """ that sits in
-                            # a JoinedStr containing a FV with a nested JoinedStr
-                            # will trigger a backslash-in-expression error.
-                            # Strip ''' whenever any sibling FV has a nested
-                            # JoinedStr, no matter whether the FV comes before
-                            # or after this constant.
-                            (
-                                not py391plus
-                                and any(
-                                    isinstance(v, ast.FormattedValue)
-                                    and any(
-                                        isinstance(n, ast.JoinedStr)
-                                        for n in ast.walk(v.value)
-                                    )
-                                    for v in parent_node.parent.node.values  # type: ignore[union-attr]
-                                )
-                            )
-                            # 3.9.1–3.11.x: ast.unparse picks the outer quote
-                            # form based on the first "interesting" content it
-                            # encounters.  The conflict only arises when this
-                            # constant is the LEADING literal (no FV before it),
-                            # because then the ''' + """ in the constant forces a
-                            # quote choice that later breaks the inner JoinedStr
-                            # expression.  When a FV precedes the constant,
-                            # ast.unparse picks its outer form based on the FV
-                            # content, which avoids the conflict.
-                            or (
-                                py391plus
-                                # Guard: this constant must be the leading literal
-                                # (no FV before it).
-                                and not any(
-                                    isinstance(v, ast.FormattedValue)
-                                    for v in parent_node.parent.node.values[  # type: ignore[union-attr, index]
-                                        : parent_node.parent_attr_index
-                                    ]
-                                )
-                                # Guard: only strip when the conflicting FV
-                                # (nested JoinedStr) comes AFTER this constant.
-                                and any(
-                                    isinstance(v, ast.FormattedValue)
-                                    and any(
-                                        isinstance(n, ast.JoinedStr)
-                                        for n in ast.walk(v.value)
-                                    )
-                                    for v in parent_node.parent.node.values[  # type: ignore[union-attr, index]
-                                        parent_node.parent_attr_index + 1 :
-                                    ]
-                                )
-                            )
-                        )
-                    )
-                    # Case B: this constant is in a format_spec JoinedStr.
-                    # astunparse (3.8) and Python 3.9–3.12.2's ast.unparse
-                    # both fail when format_spec content has ''' + """: the
-                    # outer JoinedStr ends up in escape-sequence mode (3.8) or
-                    # ast.unparse raises "Unable to avoid backslash" (3.9–3.11)
-                    # or generates uncompilable source (3.12.0–3.12.2, fixed
-                    # in 3.12.3).
-                    # Two distinct failure modes require different guards:
-                    #   3.12.0–3.12.2 (py312plus and not py1223plus): ast.unparse
-                    #     emits ''' unescaped in the format spec; Python's tokenizer
-                    #     then treats ''' as starting a triple-quoted string and
-                    #     raises "unterminated triple-quoted string literal" for
-                    #     ANY FV value expression → always strip.
-                    #   pre-3.12 (not py312plus): astunparse / ast.unparse uses
-                    #     escape-sequence mode, backslash-escaping ALL ' in the
-                    #     entire output — including expression parts.  The error
-                    #     ("backslash in f-string expression" / "Unable to avoid
-                    #     backslash") only arises when the FV value expression
-                    #     itself renders with ' chars (str/bytes constants or
-                    #     nested JoinedStr).  Plain Name/int/etc. values have no
-                    #     ' chars to escape → safe to keep '''""".
-                    or (
-                        parent_node.parent.parent_attr == "format_spec"  # type: ignore[union-attr]
-                        and parent_node.parent.parent is not None  # type: ignore[union-attr]
-                        and isinstance(
-                            parent_node.parent.parent.node,  # type: ignore[union-attr]
-                            ast.FormattedValue,
-                        )
-                        and (
-                            # 3.12.0–3.12.2: tokenizer bug — always strip.
-                            (py312plus and not py1223plus)
-                            # pre-3.12: escape-sequence mode — strip only when
-                            # the FV value renders with ' chars.
-                            or (
-                                not py312plus
-                                and any(
-                                    (
-                                        isinstance(n, ast.Constant)
-                                        and isinstance(n.value, (str, bytes))
-                                    )
-                                    or isinstance(n, ast.JoinedStr)
-                                    for n in ast.walk(
-                                        parent_node.parent.parent.node.value  # type: ignore[union-attr]
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            ):
-                # Remove all """ sequences so the value can be represented
-                # without escape-sequence mode, e.g. '''""" → ''' → the outer
-                # f-string can use double-quote form (f"'''") without escaping.
-                node.value = node.value.replace('"""', "")
-
-            if self.use(
                 not py312plus
                 and (
                     p_info == ("JoinedStr", "values")
@@ -1726,70 +1497,34 @@ class StdGenerator(AstGenerator):
                 )
                 and isinstance(node.value, str)
                 and "\\" in node.value
-                and (
-                    (
-                        not py39plus
-                        and (
-                            # Lone trailing \ (odd trailing count) with no FV
-                            # immediately after: astunparse renders \' or \"
-                            # which escapes the closing delimiter → unterminated
-                            # string → compile error.
-                            # Exception A: in a format_spec JoinedStr, a trailing
-                            # lone \ appears before } (not before the closing
-                            # quote) → safe, don't strip.
-                            # Exception B: trailing \ with FV immediately after
-                            # → astunparse emits \{...} which is valid pre-3.12.
-                            (
-                                node.value.endswith("\\")
-                                and (len(node.value) - len(node.value.rstrip("\\"))) % 2
-                                == 1
-                                and not (
-                                    # Exception A: format_spec context
-                                    parent_node.parent is not None  # type: ignore[union-attr]
-                                    and parent_node.parent.parent_attr  # type: ignore[union-attr]
-                                    == "format_spec"
-                                    and not node.value[:-1].endswith("\\")
-                                )
-                                and not (
-                                    # Exception B: trailing before FV
-                                    parent_node.parent_attr_index is not None
-                                    and parent_node.parent_attr_index + 1
-                                    < len(parent_node.parent.node.values)  # type: ignore[union-attr, arg-type]
-                                    and isinstance(
-                                        parent_node.parent.node.values[  # type: ignore[union-attr, index]
-                                            parent_node.parent_attr_index + 1
-                                        ],
-                                        ast.FormattedValue,
-                                    )
-                                )
-                            )
-                            # Or \ before a char that is not another \, ', or
-                            # ": astunparse renders it as a recognized escape
-                            # sequence (\ before n → newline escape etc.) →
-                            # parse-back changes the value → round-trip failure.
-                            # (Trailing \ positions where the next char is empty
-                            # are excluded here; they are handled above.)
-                            or any(
-                                node.value[j + 1 : j + 2] not in ("'", '"', "\\", "")
-                                for j, c in enumerate(node.value)
-                                if c == "\\"
-                            )
-                        )
-                    )
-                    # On 3.9–3.11, backslashes inside the *expression* part of
-                    # an f-string (`{...}`) are forbidden.  When this JoinedStr
-                    # is nested inside a FormattedValue.value, the backslash
-                    # ends up in the expression part of the outer f-string and
-                    # ast.unparse raises ValueError('Unable to avoid backslash
-                    # in f-string expression part').
-                    # fstring_value_depth > 0 means we are inside at least one
-                    # FormattedValue.value chain.
-                    or context.fstring_value_depth > 0
-                )
+                # On 3.9–3.11, backslashes inside the *expression* part of
+                # an f-string (`{...}`) are forbidden.  When this JoinedStr
+                # is nested inside a FormattedValue.value, the backslash ends
+                # up in the expression part of the outer f-string.
+                and context.fstring_value_depth > 0
             ):
                 # Strip backslashes so the tree is always representable.
                 # An empty result is handled by the next (empty → " ") block.
                 node.value = node.value.replace("\\", "")
+
+            if self.use(
+                not py312plus
+                and (
+                    p_info == ("JoinedStr", "values")
+                    or p_info == ("TemplateStr", "values")
+                )
+                and parent_node.parent.parent_attr == "format_spec"
+                and parent_node.parent.parent is not None
+                and isinstance(parent_node.parent.parent.node, ast.FormattedValue)
+                and any(
+                    isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes))
+                    for n in ast.walk(parent_node.parent.parent.node.value)
+                )
+                and isinstance(node.value, str)
+                and "'''" in node.value
+                and '"""' in node.value
+            ):
+                node.value = node.value.replace('"""', "")
 
             if self.use(
                 (
@@ -1834,286 +1569,14 @@ class StdGenerator(AstGenerator):
                 else:
                     new_values.append(v)
             node.values = new_values
-            # After merging, the combined string values may have new problematic
-            # combinations (e.g. one constant ends with "" and the next starts
-            # with '"' creating a new '"""' sequence, or a merged value has both
-            # ''' and """ which would enable escape-sequence mode in astunparse
-            # — and then a subsequent strip of """ would leave a dangling \).
-            # Re-apply the same strip logic that was applied to each constant
-            # individually to ensure the final merged values are also clean.
-            # Whether any FV sibling's expression contains a str Constant whose
-            # repr() uses ' outer (value has no ').  When combined with a literal
-            # that ends with ", astunparse chooses """ outer form where the
-            # trailing " + """ = """" → SyntaxError.
-            has_fv_str_const = any(
-                isinstance(v, ast.FormattedValue)
-                and any(
-                    isinstance(n, ast.Constant)
-                    and isinstance(n.value, str)
-                    and "'" not in n.value
-                    for n in ast.walk(v.value)
-                )
-                for v in node.values
-            )
-            # On Python 3.9.1–3.10.x, ast.unparse picks '"' outer when the
-            # combined literal content has more ' than ".  With '"' outer the
-            # """ in a literal is not escaped and closes the f-string early
-            # (→ SyntaxError).  Fixed in 3.11 (which switches to ''' outer).
-            # Pre-compute once; used by the per-constant """ strip below.
-            # Include chars from format_spec constants of FV children: the
-            # unparser counts ALL literal chars (including format_spec) when
-            # choosing the outer delimiter, not just top-level constants.
-            _format_spec_parts: list[str] = []
-            for _v in node.values:  # type: ignore[union-attr]
-                if isinstance(_v, ast.FormattedValue) and isinstance(
-                    _v.format_spec, ast.JoinedStr
-                ):
-                    for _n in ast.walk(_v.format_spec):
-                        if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
-                            _format_spec_parts.append(_n.value)
-            _format_spec_literal = "".join(_format_spec_parts)
-            _top_level_literal = "".join(
-                v.value
-                for v in node.values  # type: ignore[union-attr]
-                if isinstance(v, ast.Constant) and isinstance(v.value, str)
-            )
-            combined_literals = _top_level_literal + _format_spec_literal
-            more_squotes_than_dquotes = combined_literals.count(
-                "'"
-            ) > combined_literals.count('"')
-            is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
-            for merged_idx, merged in enumerate(node.values):
+            for merged in node.values:
                 if not isinstance(merged, ast.Constant) or not isinstance(
                     merged.value, str
                 ):
                     continue
                 mv = merged.value
-                # Re-apply trailing-" strip.
-                # On <3.9 (astunparse), a constant whose last characters are at
-                # the very END of the f-string content (no FormattedValue after
-                # it) and that ends with " will produce """" when the closing
-                # """ is appended, which Python lexes as """ (close) + stray "
-                # → SyntaxError.  Strip only when:
-                #   - no FV comes after this constant (it is the terminal literal)
-                #   - astunparse would choose """ outer form, which happens when
-                #     the f-string content has both ' and " (from the literal or
-                #     from FV expression strings rendered with ' outer by repr)
-                no_fv_after = not any(
-                    isinstance(node.values[j], ast.FormattedValue)
-                    for j in range(merged_idx + 1, len(node.values))
-                )
-                if (
-                    '"' in mv
-                    and '"""' not in mv
-                    and no_fv_after
-                    and (
-                        # On <3.9 (astunparse), content that has both ' and "
-                        # (but no """) causes astunparse to pick """ outer form.
-                        # A trailing " in the last literal + closing """ = """"
-                        # → SyntaxError.
-                        (not py39plus and "'" in mv)
-                        # On <3.9.1 (astunparse + early ast.unparse), when a
-                        # sibling FV expression uses str constants repr'd with
-                        # ' outer (value has no '), the unparsers can't choose
-                        # " outer (literal ends in ") and instead try ' outer
-                        # — but then must escape ' inside the expression as \'
-                        # which is forbidden in pre-3.12 f-string expressions.
-                        # Fixed in 3.9.1.
-                        or (not py391plus and has_fv_str_const)
-                    )
-                ):
-                    merged.value = mv = mv.rstrip('"')
-                # Re-apply """ strip
-                if (
-                    "'''" in mv
-                    and '"""' in mv
-                    and (
-                        # Case A (post-loop): mirrors the per-constant Case A
-                        # above.  Catches constants produced by merging adjacent
-                        # Constant siblings into a combined ''' + """ value.
-                        (
-                            not py312plus
-                            and (
-                                # pre-3.9.1 (astunparse): position-agnostic —
-                                # strip whenever any FV in values has a nested
-                                # JoinedStr.
-                                (
-                                    not py391plus
-                                    and any(
-                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
-                                        and any(
-                                            isinstance(n, ast.JoinedStr)
-                                            for n in ast.walk(node.values[j].value)  # type: ignore[union-attr, index]
-                                        )
-                                        for j in range(len(node.values))  # type: ignore[arg-type]
-                                    )
-                                )
-                                # 3.9.1–3.11.x: only strip when this is the
-                                # leading literal and a FV with nested JoinedStr
-                                # comes after.
-                                or (
-                                    py391plus
-                                    and not any(
-                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
-                                        for j in range(merged_idx)
-                                    )
-                                    and any(
-                                        isinstance(node.values[j], ast.FormattedValue)  # type: ignore[union-attr, index]
-                                        and any(
-                                            isinstance(n, ast.JoinedStr)
-                                            for n in ast.walk(node.values[j].value)  # type: ignore[union-attr, index]
-                                        )
-                                        for j in range(merged_idx + 1, len(node.values))  # type: ignore[arg-type]
-                                    )
-                                )
-                            )
-                        )
-                        # Case B: On all pre-3.12.3 versions, when a format_spec
-                        # JoinedStr constant has both ''' and """, unparsing fails.
-                        # Two distinct failure modes (see Constant-level Case B
-                        # comment above for full explanation):
-                        #   3.12.0–3.12.2: tokenizer bug — always strip.
-                        #   pre-3.12: escape-sequence mode — strip only when the
-                        #     FV value expression renders with ' chars (str/bytes
-                        #     constants or nested JoinedStr).
-                        or (
-                            is_in_format_spec
-                            and parent_node.parent is not None  # type: ignore[union-attr]
-                            and isinstance(
-                                parent_node.parent.node,  # type: ignore[union-attr]
-                                ast.FormattedValue,
-                            )
-                            and (
-                                # 3.12.0–3.12.2: tokenizer bug — always strip.
-                                (py312plus and not py1223plus)
-                                # pre-3.12: escape-sequence mode — strip only when
-                                # the FV value renders with ' chars.
-                                or (
-                                    not py312plus
-                                    and any(
-                                        (
-                                            isinstance(n, ast.Constant)
-                                            and isinstance(n.value, (str, bytes))
-                                        )
-                                        or isinstance(n, ast.JoinedStr)
-                                        for n in ast.walk(
-                                            parent_node.parent.node.value  # type: ignore[union-attr]
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                        # Case C: On Python 3.9.1–3.11.5, ast.unparse chooses
-                        # '"' outer when combined literal content has more ' than
-                        # ".  With '"' outer the '"""' in a literal constant is
-                        # emitted unescaped, which closes the f-string
-                        # prematurely → SyntaxError.  Python 3.11.6 fixed this
-                        # by switching to ''' outer in this situation.
-                        # Guard: only when a FormattedValue sibling is present.
-                        # If the JoinedStr has ONLY Constant children ast.unparse
-                        # always uses ' outer (escape-sequence mode works fine),
-                        # so no stripping is needed for the constants-only case.
-                        or (
-                            py391plus
-                            and not py1116plus
-                            and more_squotes_than_dquotes
-                            and any(
-                                isinstance(v, ast.FormattedValue)
-                                for v in node.values  # type: ignore[union-attr]
-                            )
-                        )
-                    )
-                ):
-                    merged.value = mv = mv.replace('"""', "")
-                # Re-apply backslash strip (runs AFTER """ strip so condition is correct)
-                if (
-                    not py312plus
-                    and "\\" in mv
-                    and (
-                        (
-                            not py39plus
-                            and (
-                                # Lone trailing \\ (odd count) with no FV next
-                                (
-                                    mv.endswith("\\")
-                                    and (len(mv) - len(mv.rstrip("\\"))) % 2 == 1
-                                    and not (
-                                        is_in_format_spec and not mv[:-1].endswith("\\")
-                                    )
-                                    and not (
-                                        merged_idx + 1 < len(node.values)  # type: ignore[union-attr, arg-type]
-                                        and isinstance(
-                                            node.values[merged_idx + 1],  # type: ignore[union-attr, index]
-                                            ast.FormattedValue,
-                                        )
-                                    )
-                                )
-                                # Or \\ before non-quote, non-backslash char
-                                or any(
-                                    mv[j + 1 : j + 2] not in ("'", '"', "\\", "")
-                                    for j, c in enumerate(mv)
-                                    if c == "\\"
-                                )
-                            )
-                        )
-                        or context.fstring_value_depth > 0
-                    )
-                ):
+                if not py312plus and "\\" in mv and context.fstring_value_depth > 0:
                     merged.value = mv = mv.replace("\\", "")
-
-            # Post-loop: handle ''' / """ in SEPARATE constants on 3.9.1–3.11.5
-            # and (when a format_spec is involved) on 3.12.0–3.12.2.
-            # The per-constant loop above only strips """ from constants that
-            # have BOTH ''' and """ (using escape-sequence mode).  When ''' and
-            # """ live in different constants (or at different levels — one in
-            # a format_spec, one in the outer JoinedStr) neither triggers
-            # escape-sequence mode; the unparser picks an outer form that
-            # conflicts with one of the triple-quote sequences.
-            # Guard: if any constant already has BOTH, the unparser enters
-            # escape-sequence mode for the entire f-string and round-trips
-            # correctly — skip in that case.
-            # Covers:
-            #   py391plus and not py1116plus  → 3.9.1–3.11.5 (any arrangement)
-            #   py312plus and not py1223plus  → 3.12.0–3.12.2, but ONLY when
-            #     a format_spec constant is involved (3.12.x handles same-level
-            #     ''' + """ correctly but still fails to escape ''' inside
-            #     format_spec when a single-quote outer form is chosen).
-            _format_spec_involved = bool(
-                "'''" in _format_spec_literal or '"""' in _format_spec_literal
-            )
-            if (py391plus and not py1116plus) or (
-                py312plus and not py1223plus and _format_spec_involved
-            ):
-                # Collect all string Constant nodes: top-level AND any inside
-                # format_spec sub-JoinedStrs (the unparser counts their chars
-                # when deciding the outer delimiter).
-                _all_str_consts: list[ast.Constant] = []
-                for _v in node.values:  # type: ignore[union-attr]
-                    if isinstance(_v, ast.Constant) and isinstance(_v.value, str):
-                        _all_str_consts.append(_v)
-                    elif isinstance(_v, ast.FormattedValue) and isinstance(
-                        _v.format_spec, ast.JoinedStr
-                    ):
-                        for _n in ast.walk(_v.format_spec):
-                            if isinstance(_n, ast.Constant) and isinstance(
-                                _n.value, str
-                            ):
-                                _all_str_consts.append(_n)
-                any_const_has_both = any(
-                    "'''" in c.value and '"""' in c.value for c in _all_str_consts
-                )
-                if (
-                    not any_const_has_both
-                    and "'''" in combined_literals
-                    and '"""' in combined_literals
-                ):
-                    for const_node in _all_str_consts:
-                        if "'''" in const_node.value and '"""' not in const_node.value:
-                            const_node.value = const_node.value.replace("'''", "")
-                        elif (
-                            '"""' in const_node.value and "'''" not in const_node.value
-                        ):
-                            const_node.value = const_node.value.replace('"""', "")
 
         if isinstance(node, InterpolationOrFormattedValue):
             valid_conversion = (-1, 115, 114, 97)
@@ -3004,14 +2467,6 @@ class StdGenerator(AstGenerator):
             and child.parent.parent is not None  # type: ignore[union-attr]
             and child.parent.parent_attr == "handlers"  # type: ignore[union-attr]
             and type(child.parent.parent.node).__name__ == "TryStar"  # type: ignore[union-attr]
-        ):
-            return False
-        # Python 3.15+ marks DictComp.value as optional in the grammar, but ast.unparse
-        # does not handle DictComp(value=None) and raises AttributeError.  Forbid None
-        # here so neither the generator nor the checker ever produces such a tree.
-        if (
-            child.parent_attr == "value"
-            and type(child.parent.node).__name__ == "DictComp"  # type: ignore[union-attr]
         ):
             return False
         return True

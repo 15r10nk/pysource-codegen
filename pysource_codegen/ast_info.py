@@ -72,5 +72,4 @@ def get_info(name: str) -> NodeType | BuiltinNodeType | UnionNodeType:
     return type_infos[name]
 
 
-if sys.version_info < (3, 9):
-    from .static_type_info import type_infos  # type: ignore
+assert sys.version_info >= (3, 9)
