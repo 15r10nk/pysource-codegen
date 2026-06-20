@@ -7,7 +7,7 @@ name = "pysource-codegen"
 version= "0.7.1"
 description = 'generate random python code to test linter/formatter/and other tools'
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = "MIT"
 keywords = []
 authors = [
@@ -16,7 +16,6 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -28,9 +27,12 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-"astunparse >=1.6.3; python_version<'3.9' ",
+"ast-decompiler >=0.8.0",
 "typing-extensions>=4.7.1"
 ]
+
+[tool.uv.sources]
+ast-decompiler = { path = "vendor/ast_decompiler" }
 
 [project.urls]
 Documentation = "https://github.com/15r10nk/pysource-codegen#readme"
@@ -41,7 +43,7 @@ Source = "https://github.com/15r10nk/pysource-codegen"
 path = "pysource_codegen/__init__.py"
 
 [[tool.hatch.envs.hatch-test.matrix]]
-python=["3.8","3.9","3.10","3.11","3.12","3.13","3.14"]
+python=["3.9","3.10","3.11","3.12","3.13","3.14"]
 
 [tool.hatch.envs.hatch-test]
 extra-dependencies=[
@@ -51,7 +53,7 @@ extra-dependencies=[
 ]
 
 [[tool.hatch.envs.types.matrix]]
-python=["3.8","3.9","3.10","3.11","3.12","3.13","3.14"]
+python=["3.9","3.10","3.11","3.12","3.13","3.14"]
 
 [tool.hatch.envs.types]
 extra-dependencies = [

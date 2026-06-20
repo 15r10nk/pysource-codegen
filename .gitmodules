@@ -1,0 +1,3 @@
+[submodule "vendor/ast_decompiler"]
+	path = vendor/ast_decompiler
+	url = https://github.com/JelleZijlstra/ast_decompiler.git

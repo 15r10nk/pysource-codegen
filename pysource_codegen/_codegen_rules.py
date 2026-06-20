@@ -12,6 +12,7 @@ from ._limits import f_string_format_limit
 from ._utils import arguments
 from ._utils import only_firstone
 from ._utils import unique_by
+from ._utils import unparse
 from ._utils import walk_childs_first
 from ._utils import walk_function_nodes
 from ._utils import walk_until
@@ -25,7 +26,11 @@ py39plus = (3, 9) <= sys.version_info
 py391plus = (3, 9, 1) <= sys.version_info  # ast.unparse f-string quoting fixed in 3.9.1
 py310plus = (3, 10) <= sys.version_info
 py311plus = (3, 11) <= sys.version_info
-py1116plus = (3, 11, 6) <= sys.version_info  # ast.unparse f-string ''' outer quoting fixed in 3.11.6
+py1116plus = (
+    3,
+    11,
+    6,
+) <= sys.version_info  # ast.unparse f-string ''' outer quoting fixed in 3.11.6
 py312plus = (3, 12) <= sys.version_info
 py1223plus = (
     3,
@@ -483,9 +488,13 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and sys.version_info < (3, 13) and (
-            context.in_typed_func_annotation_in_class
-            or (context.in_type_scope and context.in_class_not_function)
+        if (
+            py312plus
+            and sys.version_info < (3, 13)
+            and (
+                context.in_typed_func_annotation_in_class
+                or (context.in_type_scope and context.in_class_not_function)
+            )
         ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
@@ -544,9 +553,13 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and sys.version_info < (3, 13) and (
-            context.in_typed_func_annotation_in_class
-            or (context.in_type_scope and context.in_class_not_function)
+        if (
+            py312plus
+            and sys.version_info < (3, 13)
+            and (
+                context.in_typed_func_annotation_in_class
+                or (context.in_type_scope and context.in_class_not_function)
+            )
         ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
@@ -593,10 +606,14 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and sys.version_info < (3, 13) and (
-            context.in_type_alias_in_class
-            or context.in_typed_func_annotation_in_class
-            or (context.in_type_scope and context.in_class_not_function)
+        if (
+            py312plus
+            and sys.version_info < (3, 13)
+            and (
+                context.in_type_alias_in_class
+                or context.in_typed_func_annotation_in_class
+                or (context.in_type_scope and context.in_class_not_function)
+            )
         ):
             # SyntaxError('Cannot use lambda in annotation scope within class scope')
             raise Invalid
@@ -626,9 +643,13 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and sys.version_info < (3, 13) and (
-            context.in_typed_func_annotation_in_class
-            or (context.in_type_scope and context.in_class_not_function)
+        if (
+            py312plus
+            and sys.version_info < (3, 13)
+            and (
+                context.in_typed_func_annotation_in_class
+                or (context.in_type_scope and context.in_class_not_function)
+            )
         ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
@@ -754,9 +775,13 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if py312plus and sys.version_info < (3, 13) and (
-            context.in_typed_func_annotation_in_class
-            or (context.in_type_scope and context.in_class_not_function)
+        if (
+            py312plus
+            and sys.version_info < (3, 13)
+            and (
+                context.in_typed_func_annotation_in_class
+                or (context.in_type_scope and context.in_class_not_function)
+            )
         ):
             # SyntaxError('Cannot use comprehension in annotation scope within class scope')
             raise Invalid
@@ -961,7 +986,11 @@ class StdGenerator(AstGenerator):
             # On 3.11+, CPython relaxed the restriction and allows await in
             # nested comprehensions inside GeneratorExp.elt even without an async
             # function frame, so we only apply this clearing on <3.11.
-            or (not ctx.in_async_function_scope and not py311plus and node_type in ("DictComp", "SetComp", "ListComp"))
+            or (
+                not ctx.in_async_function_scope
+                and not py311plus
+                and node_type in ("DictComp", "SetComp", "ListComp")
+            )
         ):
             ctx.in_async_code = False
 
@@ -1147,15 +1176,25 @@ class StdGenerator(AstGenerator):
         #     TypeAlias.value and TypeVar.bound/default_value in class scope).
         #     Cleared at function/lambda/class body and comprehension elt/key/value
         #     boundaries (same clearing points as in_annotation_return_scope). ---
-        if (node_type, attr) in (
-            ("FunctionDef", "returns"),
-            ("AsyncFunctionDef", "returns"),
-        ) and ctx.in_class_not_function and getattr(node.node, "type_params", []):
+        if (
+            (node_type, attr)
+            in (
+                ("FunctionDef", "returns"),
+                ("AsyncFunctionDef", "returns"),
+            )
+            and ctx.in_class_not_function
+            and getattr(node.node, "type_params", [])
+        ):
             ctx.in_typed_func_annotation_in_class = True
-        elif (node_type, attr) in (
-            ("ClassDef", "bases"),
-            ("ClassDef", "keywords"),
-        ) and ctx.in_class_not_function and getattr(node.node, "type_params", []):
+        elif (
+            (node_type, attr)
+            in (
+                ("ClassDef", "bases"),
+                ("ClassDef", "keywords"),
+            )
+            and ctx.in_class_not_function
+            and getattr(node.node, "type_params", [])
+        ):
             ctx.in_typed_func_annotation_in_class = True
         elif (node_type, attr) == ("arg", "annotation") and ctx.in_class_not_function:
             # node.parent = arguments NodeRef, node.parent.parent = FunctionDef NodeRef.
@@ -1181,7 +1220,6 @@ class StdGenerator(AstGenerator):
             and node_type in ("FunctionDef", "AsyncFunctionDef", "Lambda", "ClassDef")
         ):
             ctx.in_typed_func_annotation_in_class = False
-
 
         ctx.in_ann_assign_target = node_type == "AnnAssign" and attr == "target"
         # Since attr_order generates AnnAssign.value before AnnAssign.target,
@@ -1703,9 +1741,8 @@ class StdGenerator(AstGenerator):
                             # → astunparse emits \{...} which is valid pre-3.12.
                             (
                                 node.value.endswith("\\")
-                                and (
-                                    len(node.value) - len(node.value.rstrip("\\"))
-                                ) % 2 == 1
+                                and (len(node.value) - len(node.value.rstrip("\\"))) % 2
+                                == 1
                                 and not (
                                     # Exception A: format_spec context
                                     parent_node.parent is not None  # type: ignore[union-attr]
@@ -1733,8 +1770,7 @@ class StdGenerator(AstGenerator):
                             # (Trailing \ positions where the next char is empty
                             # are excluded here; they are handled above.)
                             or any(
-                                node.value[j + 1 : j + 2]
-                                not in ("'", '"', "\\", "")
+                                node.value[j + 1 : j + 2] not in ("'", '"', "\\", "")
                                 for j, c in enumerate(node.value)
                                 if c == "\\"
                             )
@@ -1842,7 +1878,9 @@ class StdGenerator(AstGenerator):
                 if isinstance(v, ast.Constant) and isinstance(v.value, str)
             )
             combined_literals = _top_level_literal + _format_spec_literal
-            more_squotes_than_dquotes = combined_literals.count("'") > combined_literals.count('"')
+            more_squotes_than_dquotes = combined_literals.count(
+                "'"
+            ) > combined_literals.count('"')
             is_in_format_spec = parent_node.parent_attr == "format_spec"  # type: ignore[union-attr]
             for merged_idx, merged in enumerate(node.values):
                 if not isinstance(merged, ast.Constant) or not isinstance(
@@ -1998,11 +2036,9 @@ class StdGenerator(AstGenerator):
                                 # Lone trailing \\ (odd count) with no FV next
                                 (
                                     mv.endswith("\\")
-                                    and (len(mv) - len(mv.rstrip("\\")))
-                                    % 2 == 1
+                                    and (len(mv) - len(mv.rstrip("\\"))) % 2 == 1
                                     and not (
-                                        is_in_format_spec
-                                        and not mv[:-1].endswith("\\")
+                                        is_in_format_spec and not mv[:-1].endswith("\\")
                                     )
                                     and not (
                                         merged_idx + 1 < len(node.values)  # type: ignore[union-attr, arg-type]
@@ -2014,8 +2050,7 @@ class StdGenerator(AstGenerator):
                                 )
                                 # Or \\ before non-quote, non-backslash char
                                 or any(
-                                    mv[j + 1 : j + 2]
-                                    not in ("'", '"', "\\", "")
+                                    mv[j + 1 : j + 2] not in ("'", '"', "\\", "")
                                     for j, c in enumerate(mv)
                                     if c == "\\"
                                 )
@@ -2075,7 +2110,9 @@ class StdGenerator(AstGenerator):
                     for const_node in _all_str_consts:
                         if "'''" in const_node.value and '"""' not in const_node.value:
                             const_node.value = const_node.value.replace("'''", "")
-                        elif '"""' in const_node.value and "'''" not in const_node.value:
+                        elif (
+                            '"""' in const_node.value and "'''" not in const_node.value
+                        ):
                             const_node.value = const_node.value.replace('"""', "")
 
         if isinstance(node, InterpolationOrFormattedValue):
@@ -2486,11 +2523,11 @@ class StdGenerator(AstGenerator):
                             )
                         ]
                     )
-                    f_str_repr = ast.unparse(f_str)
+                    f_str_repr = unparse(f_str)
                     if f_str_repr.startswith(("f'''", 'f"""')):
-                        n.str = ast.unparse(f_str)[5:-4]  # strip f"""{...}"""
+                        n.str = unparse(f_str)[5:-4]  # strip f"""{...}"""
                     else:
-                        n.str = ast.unparse(f_str)[3:-2]  # strip f"{...}"
+                        n.str = unparse(f_str)[3:-2]  # strip f"{...}"
 
                 if self.use(
                     isinstance(n, ast.Interpolation)
@@ -2987,7 +3024,10 @@ class StdGenerator(AstGenerator):
             result = [n for n in field_names if n != "value"]
             result.insert(result.index("target"), "value")
             return result
-        if ast_type_name in ("FunctionDef", "AsyncFunctionDef", "ClassDef") and "type_params" in field_names:
+        if (
+            ast_type_name in ("FunctionDef", "AsyncFunctionDef", "ClassDef")
+            and "type_params" in field_names
+        ):
             # Generate 'type_params' before 'args', 'returns', 'bases', 'keywords' so
             # that context_before for those attrs can inspect node.node.type_params and
             # know whether comprehensions/lambdas in annotation positions are forbidden

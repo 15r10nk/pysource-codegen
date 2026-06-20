@@ -21,10 +21,7 @@ from typing import Callable, Hashable, Iterator, List, TypeVar, Union, Any
 # element type so the alias can be recursive.
 Value = Union[ast.AST, List["Value"], str, int, float, bytes, bool, None]
 
-if sys.version_info >= (3, 9):
-    from ast import unparse
-else:
-    from astunparse import unparse  # type: ignore
+from ast_decompiler import decompile as unparse
 
 
 def ast_dump(node: ast.AST | list[ast.AST]) -> str:
