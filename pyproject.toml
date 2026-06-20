@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-ast-decompiler = { path = "vendor/ast_decompiler" }
+ast-decompiler = { path = "vendor/ast_decompiler", editable = true }
 
 [project.urls]
 Documentation = "https://github.com/15r10nk/pysource-codegen#readme"

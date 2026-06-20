@@ -15,6 +15,7 @@ import itertools
 import multiprocessing.synchronize
 import os
 import subprocess
+import sys
 from concurrent.futures import FIRST_COMPLETED
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import wait
@@ -30,6 +31,8 @@ from rich.progress import TaskProgressColumn
 from rich.progress import TextColumn
 from rich.progress import TimeRemainingColumn
 from rich.text import Text
+
+sys.path.insert(0, str(Path(__file__).parent / "vendor" / "ast_decompiler"))
 
 from tests.test_invalid_ast import generate_invalid_ast
 from tests.test_valid_source import generate_valid_source
