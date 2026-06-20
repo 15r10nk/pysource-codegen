@@ -81,7 +81,7 @@ for minor in pre:
     filtered_versions.append(pre[minor])
 
 versions = sorted(
-    [v for v in filtered_versions if version_tuple(v) >= (3, 8)], key=version_tuple
+    [v for v in filtered_versions if version_tuple(v) >= (3, 9)], key=version_tuple
 )
 
 
