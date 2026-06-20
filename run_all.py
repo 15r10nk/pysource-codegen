@@ -6,8 +6,10 @@
 # ///
 import concurrent.futures
 import json
+import os
 import re
 import subprocess
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -86,9 +88,16 @@ versions = sorted(
 
 
 def run_test(version):
+    env = os.environ.copy()
+    ast_decompiler_path = str(Path(__file__).parent / "vendor" / "ast_decompiler")
+    if env.get("PYTHONPATH"):
+        env["PYTHONPATH"] = ast_decompiler_path + os.pathsep + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = ast_decompiler_path
     result = subprocess.run(
         ["uvx", "-p", version, "--with-editable=.", "python", "-m", "unittest", "-v"],
         capture_output=True,
+        env=env,
         text=True,
     )
     fail_cmds = []
