@@ -2275,6 +2275,14 @@ class StdGenerator(AstGenerator):
 
                 return node
 
+            if sys.version_info >= (3, 12):
+
+                def visit_TypeAlias(  # type: ignore[name-defined]
+                    self, node: ast.TypeAlias
+                ) -> ast.AST | list[ast.AST] | None:
+                    self.visit(node.name)
+                    return node
+
             # pattern matching
             if sys.version_info >= (3, 10):
 
