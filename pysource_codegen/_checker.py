@@ -1,6 +1,7 @@
 import ast
 
 from pysource_codegen._codegen_rules import StdGenerator
+from pysource_codegen._generator import Invalid
 from pysource_codegen._generator import NodeRef
 from pysource_codegen._utils import equal_ast
 
@@ -15,7 +16,7 @@ class AstChecker(StdGenerator):
         self.target = tree
         try:
             new_tree = self.generate(type(tree).__name__)
-        except (_InvalidTree, AttributeError, IndexError):
+        except (_InvalidTree, AttributeError, IndexError, Invalid):
             return False
         return equal_ast(tree, new_tree, print)
 
@@ -42,7 +43,7 @@ class AstChecker(StdGenerator):
 
         return 1 if equal_current_type else 0
 
-    def attr_length_provider(self, parent_node: NodeRef):
+    def attr_length_provider(self, parent_node: NodeRef, context=None):
         target_parent = parent_node.relocate(self.target)
         node_type = type(target_parent.node).__name__
         same_length = self.same_length()
@@ -66,7 +67,7 @@ class AstChecker(StdGenerator):
 
         return attr_length
 
-    def _should_place_none(self, child_parent_node, quantity, new_node):
+    def _should_place_none(self, child_parent_node, quantity, new_node, context=None):
         if "?" not in quantity:
             return False
         target_is_none = child_parent_node.relocate(self.target).node is None

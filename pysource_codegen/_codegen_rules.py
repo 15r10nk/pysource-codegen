@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import sys
-from typing import Callable
 from typing import Iterable
 
 from ._limits import f_string_expr_limit
@@ -52,100 +51,6 @@ if sys.version_info >= (3, 10):
         # default: not a wildcard
         return False
 
-    # @lambda f:lambda pattern:set(f(pattern))
-    def all_names(node: ast.AST):  # type: ignore[misc]
-        if isinstance(node, ast.MatchAs) and node.name:  # type: ignore[union-attr]
-            yield node.name  # type: ignore[union-attr]
-        elif isinstance(node, ast.MatchStar) and node.name:  # type: ignore[union-attr]
-            yield node.name  # type: ignore[union-attr]
-        elif isinstance(node, ast.MatchMapping) and node.rest:  # type: ignore[union-attr]
-            yield node.rest  # type: ignore[union-attr]
-        elif isinstance(node, ast.MatchOr):  # type: ignore[attr-defined]
-            yield from set.intersection(
-                *[set(all_names(pattern)) for pattern in node.patterns]  # type: ignore[union-attr]
-            )
-        else:
-            for child in ast.iter_child_nodes(node):
-                yield from all_names(child)
-
-    class RemoveName(ast.NodeVisitor):
-        def __init__(self, condition: Callable[[str | None], bool]) -> None:
-            self.condition = condition
-
-        def visit_MatchAs(self, node: ast.MatchAs) -> None:  # type: ignore[attr-defined]
-            if self.condition(node.name):  # type: ignore[union-attr]
-                node.name = None  # type: ignore[union-attr]
-
-        def visit_MatchMapping(self, node: ast.MatchMapping) -> None:  # type: ignore[attr-defined]
-            if self.condition(node.rest):  # type: ignore[union-attr]
-                node.rest = None  # type: ignore[union-attr]
-
-    class RemoveNameCleanup(ast.NodeTransformer):
-        def visit_MatchAs(  # type: ignore[attr-defined]
-            self, node: ast.MatchAs
-        ) -> ast.AST | list[ast.AST] | None:
-            if node.name is None and node.pattern is not None:  # type: ignore[union-attr]
-                return self.visit(node.pattern)  # type: ignore[union-attr]
-            return self.generic_visit(node)
-
-    class FixPatternNames(ast.NodeTransformer):
-        def __init__(
-            self, used: set[str] | None = None, allowed: set[str] | None = None
-        ) -> None:
-            # variables which are already used
-            self.used: set[str] = set() if used is None else set(used)
-            # variables which are allowed in a MatchOr
-            self.allowed: set[str] | None = allowed
-
-        def is_allowed(self, name: str | None) -> bool:
-            return (
-                name is None
-                or name not in self.used
-                and (name in self.allowed if self.allowed is not None else True)
-            )
-
-        def visit_MatchAs(  # type: ignore[attr-defined]
-            self, node: ast.MatchAs
-        ) -> ast.AST | list[ast.AST] | None:
-            if not self.is_allowed(node.name):  # type: ignore[union-attr]
-                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
-            elif node.name is not None:  # type: ignore[union-attr]
-                self.used.add(node.name)  # type: ignore[union-attr]
-            return self.generic_visit(node)
-
-        def visit_MatchStar(  # type: ignore[attr-defined]
-            self, node: ast.MatchStar
-        ) -> ast.AST | list[ast.AST] | None:
-            if not self.is_allowed(node.name):  # type: ignore[union-attr]
-                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
-            elif node.name is not None:  # type: ignore[union-attr]
-                self.used.add(node.name)  # type: ignore[union-attr]
-            return self.generic_visit(node)
-
-        def visit_MatchMapping(  # type: ignore[attr-defined]
-            self, node: ast.MatchMapping
-        ) -> ast.AST | list[ast.AST] | None:
-            if not self.is_allowed(node.rest):  # type: ignore[union-attr]
-                return ast.MatchSingleton(value=None)  # type: ignore[attr-defined]
-            elif node.rest is not None:  # type: ignore[union-attr]
-                self.used.add(node.rest)  # type: ignore[union-attr]
-            return self.generic_visit(node)
-
-        def visit_MatchOr(self, node: ast.MatchOr) -> ast.MatchOr:  # type: ignore[attr-defined]
-            allowed = set.intersection(
-                *[set(all_names(pattern)) for pattern in node.patterns]  # type: ignore[union-attr]
-            )
-            allowed -= self.used
-
-            node.patterns = [  # type: ignore[union-attr]
-                FixPatternNames(set(self.used), allowed).visit(child)  # type: ignore[arg-type]
-                for child in node.patterns  # type: ignore[union-attr]
-            ]
-
-            self.used |= allowed
-
-            return node
-
 
 class StdGenerator(AstGenerator):
 
@@ -176,6 +81,156 @@ class StdGenerator(AstGenerator):
         branches whose guard is already ``False``.
         """
         return condition
+
+    def _planned_match_case_names(self, node: NodeRef) -> frozenset[str]:
+        if hasattr(self, "target"):
+            target_case = node.relocate(self.target).node  # type: ignore[attr-defined]
+            return self._pattern_bound_names(target_case.pattern)  # type: ignore[union-attr]
+
+        names = [f"name_{i}" for i in range(6)]
+        self.rand.shuffle(names)
+        return frozenset(names[: self.rand.randint(0, len(names))])
+
+    def _pattern_bound_names(self, node: ast.AST | None) -> frozenset[str]:
+        if not py310plus or node is None:
+            return frozenset()
+
+        if isinstance(node, ast.MatchAs):
+            names = set(self._pattern_bound_names(node.pattern))
+            if node.name is not None:
+                names.add(node.name)
+            return frozenset(names)
+
+        if isinstance(node, ast.MatchStar):
+            return frozenset() if node.name is None else frozenset({node.name})
+
+        if isinstance(node, ast.MatchMapping):
+            names: set[str] = set()
+            for pattern in node.patterns:
+                names.update(self._pattern_bound_names(pattern))
+            if node.rest is not None:
+                names.add(node.rest)
+            return frozenset(names)
+
+        if isinstance(node, ast.MatchClass):
+            names = set()
+            for pattern in [*node.patterns, *node.kwd_patterns]:
+                names.update(self._pattern_bound_names(pattern))
+            return frozenset(names)
+
+        if isinstance(node, ast.MatchSequence):
+            names = set()
+            for pattern in node.patterns:
+                names.update(self._pattern_bound_names(pattern))
+            return frozenset(names)
+
+        if isinstance(node, ast.MatchOr):
+            if not node.patterns:
+                return frozenset()
+            names = self._pattern_bound_names(node.patterns[0])
+            for pattern in node.patterns[1:]:
+                if self._pattern_bound_names(pattern) != names:
+                    return frozenset()
+            return names
+
+        return frozenset()
+
+    def _remaining_pattern_names(self, context: Context) -> frozenset[str]:
+        return context.match_required_names - context.match_used_names
+
+    def _add_match_used_names(self, context: Context, names: Iterable[str]) -> None:
+        context.match_used_names = context.match_used_names | frozenset(names)
+
+    def _is_match_binding_identifier(self, node: NodeRef) -> bool:
+        return py310plus and (
+            (node.parent_attr == "name" and isinstance(node.parent.node, ast.MatchAs))  # type: ignore[union-attr]
+            or (
+                node.parent_attr == "name"
+                and isinstance(node.parent.node, ast.MatchStar)  # type: ignore[union-attr]
+            )
+            or (
+                node.parent_attr == "rest"
+                and isinstance(node.parent.node, ast.MatchMapping)  # type: ignore[union-attr]
+            )
+        )
+
+    def _is_direct_match_or_alternative(self, node: NodeRef) -> bool:
+        return (
+            py310plus
+            and node.parent is not None
+            and node.parent.parent_attr == "patterns"
+            and isinstance(node.parent.parent.node, ast.MatchOr)  # type: ignore[union-attr]
+        )
+
+    def _split_required_match_names(
+        self, context: Context, attr: str, index: int | None
+    ) -> frozenset[str]:
+        remaining = self._remaining_pattern_names(context)
+        if not remaining:
+            return frozenset()
+
+        if attr == "patterns":
+            return remaining
+        if attr == "kwd_patterns":
+            return remaining
+        if attr in ("name", "rest"):
+            return frozenset({sorted(remaining)[0]})
+        if attr == "pattern":
+            return (
+                frozenset(sorted(remaining)[:-1]) if len(remaining) > 1 else frozenset()
+            )
+        return frozenset()
+
+    def _should_place_none(
+        self,
+        child_parent_node: NodeRef,
+        quantity: str,
+        new_node: NodeRef,
+        context: Context | None = None,
+    ) -> bool:
+        if "?" in quantity and self._is_match_binding_identifier(child_parent_node):
+            if self._remaining_pattern_names(context or Context()):
+                return False
+            if self.none_allowed(child_parent_node):
+                return True
+
+        if (
+            "?" in quantity
+            and py310plus
+            and child_parent_node.parent_attr == "pattern"
+            and isinstance(child_parent_node.parent.node, ast.MatchAs)  # type: ignore[union-attr]
+        ):
+            if self._is_direct_match_or_alternative(child_parent_node.parent):  # type: ignore[arg-type]
+                return False
+            return not self._remaining_pattern_names(context or Context())
+
+        return super()._should_place_none(
+            child_parent_node, quantity, new_node, context
+        )
+
+    def generate_BuiltinNodeType(
+        self,
+        place,
+        parent_node,
+        info,
+        ast_type_name: str,
+        depth: int,
+        stop: bool,
+        context: Context,
+    ) -> None:
+        if (
+            info.kind == "identifier"
+            and parent_node is not None
+            and self._is_match_binding_identifier(parent_node)
+        ):
+            remaining = self._remaining_pattern_names(context)
+            if remaining:
+                place(sorted(remaining)[0])
+                return
+            raise Invalid
+        super().generate_BuiltinNodeType(
+            place, parent_node, info, ast_type_name, depth, stop, context
+        )
 
     def probability_try(
         self, node: NodeRef, child_name: str, context: Context
@@ -617,6 +672,62 @@ class StdGenerator(AstGenerator):
     ) -> float | None:
         if p_type != "MatchSequence":
             raise Invalid
+        if len(self._remaining_pattern_names(context)) > 1:
+            raise Invalid
+        return None
+
+    def probability_try_MatchSingleton(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if self._remaining_pattern_names(context):
+            raise Invalid
+        return None
+
+    def probability_try_MatchValue(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if self._remaining_pattern_names(context):
+            raise Invalid
+        return None
+
+    def probability_try_MatchOr(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        return None
+
+    def probability_try_MatchAs(
+        self,
+        node: NodeRef,
+        par: NodeRef,
+        gpar: NodeRef | None,
+        p_type: str,
+        p_attr: str,
+        p_info: tuple[str, str],
+        context: Context,
+    ) -> float | None:
+        if context.in_match_or_pattern and not self._remaining_pattern_names(context):
+            raise Invalid
         return None
 
     def probability_try_Name(
@@ -906,6 +1017,52 @@ class StdGenerator(AstGenerator):
         node_type = type(node.node).__name__
         is_function_def = node_type in ("FunctionDef", "AsyncFunctionDef", "Lambda")
         ctx = context.copy()
+
+        if py310plus and (node_type, attr) == ("match_case", "pattern"):
+            names = self._planned_match_case_names(node)
+            ctx.match_case_names = names
+            ctx.match_required_names = names
+            ctx.match_used_names = frozenset()
+            ctx.in_match_or_pattern = False
+            ctx.match_or_node_id = None
+            ctx.match_or_required_names = frozenset()
+            ctx.in_match_case_pattern = True
+        elif context.in_match_case_pattern:
+            if node_type == "MatchOr" and attr == "patterns":
+                node_id = id(node.node)
+                if context.match_or_node_id != node_id:
+                    context.match_or_node_id = node_id
+                    context.match_or_required_names = self._remaining_pattern_names(
+                        context
+                    )
+                ctx.match_required_names = context.match_or_required_names
+                ctx.match_used_names = frozenset()
+                ctx.in_match_or_pattern = True
+                ctx.match_or_node_id = None
+                ctx.match_or_required_names = frozenset()
+                ctx.in_match_case_pattern = True
+            elif (node_type, attr) == ("MatchClass", "cls"):
+                ctx.match_required_names = frozenset()
+                ctx.match_used_names = frozenset()
+                ctx.in_match_or_pattern = context.in_match_or_pattern
+                ctx.match_or_node_id = None
+                ctx.match_or_required_names = frozenset()
+                ctx.in_match_case_pattern = True
+            elif node_type in (
+                "MatchAs",
+                "MatchStar",
+                "MatchMapping",
+                "MatchSequence",
+                "MatchClass",
+            ):
+                ctx.match_required_names = self._split_required_match_names(
+                    context, attr, index
+                )
+                ctx.match_used_names = frozenset()
+                ctx.in_match_or_pattern = context.in_match_or_pattern
+                ctx.match_or_node_id = None
+                ctx.match_or_required_names = frozenset()
+                ctx.in_match_case_pattern = True
 
         # --- in_async_code ---
         # GeneratorExp.elt is included to allow `await` in the elt of an async
@@ -1326,6 +1483,40 @@ class StdGenerator(AstGenerator):
 
         return ctx
 
+    def context_after(
+        self,
+        context: Context,
+        child_context: Context,
+        node: NodeRef,
+        attr: str,
+        index: int | None,
+        value,
+    ) -> None:
+        if not py310plus or not child_context.in_match_case_pattern:
+            return
+
+        if self._is_match_binding_identifier(node.new_child(value, attr, index)):
+            if value is None:
+                return
+            if value not in child_context.match_required_names:
+                raise Invalid(
+                    f"{type(node.node).__name__}.{attr}={value!r} not in "
+                    f"{child_context.match_required_names!r}"
+                )
+            self._add_match_used_names(child_context, (value,))
+
+        if (type(node.node).__name__, attr) == ("match_case", "pattern"):
+            if child_context.match_used_names != child_context.match_case_names:
+                raise Invalid
+
+        context.match_case_names = (
+            context.match_case_names | child_context.match_case_names
+        )
+        context.match_required_names = (
+            context.match_required_names | child_context.match_required_names
+        )
+        self._add_match_used_names(context, child_context.match_used_names)
+
     def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
         p_attr = parent_node.parent_attr
         p_type = (
@@ -1723,9 +1914,6 @@ class StdGenerator(AstGenerator):
             ):
                 return ast.MatchValue(value=ast.Constant(value=node.value))
 
-            if isinstance(node, ast.match_case):
-                node.pattern = FixPatternNames().visit(node.pattern)
-
             if isinstance(node, ast.MatchMapping):
 
                 def can_literal_eval(node):
@@ -1740,18 +1928,7 @@ class StdGenerator(AstGenerator):
                 node.keys = unique_by(node.keys, ast.literal_eval)
                 del node.patterns[len(node.keys) :]
 
-                seen = set()
-                for pattern in node.patterns:
-                    RemoveName(lambda name: name in seen).visit(pattern)
-                    seen |= {*all_names(pattern)}
-
             if isinstance(node, ast.MatchOr):
-                var_names = set.intersection(
-                    *[set(all_names(pattern)) for pattern in node.patterns]
-                )
-
-                RemoveName(lambda name: name not in var_names).visit(node)
-
                 for i, pattern in enumerate(node.patterns):
                     if match_wildcard(pattern):
                         node.patterns = node.patterns[: i + 1]
@@ -1777,22 +1954,9 @@ class StdGenerator(AstGenerator):
             if isinstance(node, ast.MatchSequence):
                 only_firstone(node.patterns, lambda e: isinstance(e, ast.MatchStar))
 
-                seen = set()
-                for pattern in node.patterns:
-                    RemoveName(lambda name: name in seen).visit(pattern)
-                    seen |= {*all_names(pattern)}
-
             if isinstance(node, ast.MatchClass):
                 node.kwd_attrs = unique_by(node.kwd_attrs, lambda e: e)
                 del node.kwd_patterns[len(node.kwd_attrs) :]
-
-                seen = set()
-                for pattern in [*node.patterns, *node.kwd_patterns]:
-                    RemoveName(lambda name: name in seen).visit(pattern)
-                    seen |= {*all_names(pattern)}
-
-            if isinstance(node, ast.Match):
-                node = RemoveNameCleanup().visit(node)
 
         if isinstance(node, ast.comprehension):
             # is_async is logically boolean (0 = sync, 1 = async).  Any truthy
@@ -2427,6 +2591,29 @@ class StdGenerator(AstGenerator):
         node = FunctionTransformer([], [], [], []).visit(node)
         return node
 
+    def attr_length_provider(
+        self, parent_node: NodeRef, context: Context | None = None
+    ):
+        attr_length = super().attr_length_provider(parent_node, context)
+        node_type = type(parent_node.node).__name__
+
+        def wrapped_attr_length(attr_name, stop):
+            length = attr_length(attr_name, stop)
+            if context is None or not self._remaining_pattern_names(context):
+                return length
+            if (node_type, attr_name) in (
+                ("MatchSequence", "patterns"),
+                ("MatchMapping", "keys"),
+                ("MatchMapping", "patterns"),
+                ("MatchClass", "patterns"),
+                ("MatchClass", "kwd_attrs"),
+                ("MatchClass", "kwd_patterns"),
+            ):
+                return 1
+            return length
+
+        return wrapped_attr_length
+
     def min_attr_length(self, node_type: str, attr_name: str) -> int:
         attr = f"{node_type}.{attr_name}"
         if node_type == "Module" and attr_name == "body":
@@ -2468,6 +2655,13 @@ class StdGenerator(AstGenerator):
         return 0
 
     def none_allowed(self, child: NodeRef) -> bool:
+        if (
+            sys.version_info >= (3, 10)
+            and child.parent_attr == "name"
+            and isinstance(child.parent.node, ast.MatchAs)  # type: ignore[union-attr]
+            and child.parent.node.pattern is not None  # type: ignore[union-attr]
+        ):
+            return False
         # ExceptHandler.type must not be None when ExceptHandler is inside TryStar.handlers
         if (
             child.parent_attr == "type"

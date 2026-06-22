@@ -52,6 +52,19 @@ class Context:
     in_match_value_unaryop: bool = False
     # True inside MatchClass.cls
     in_match_class_cls: bool = False
+    # Capture names planned for the current match_case pattern
+    match_case_names: frozenset[str] = frozenset()
+    # Capture names that still need to be bound in the current pattern subtree
+    match_required_names: frozenset[str] = frozenset()
+    # Capture names already bound while generating the current pattern subtree
+    match_used_names: frozenset[str] = frozenset()
+    # True while generating a direct MatchOr alternative pattern
+    in_match_or_pattern: bool = False
+    # Node id and frozen required names for the current MatchOr alternatives
+    match_or_node_id: int | None = None
+    match_or_required_names: frozenset[str] = frozenset()
+    # True while generating a match_case pattern, even when no names are planned
+    in_match_case_pattern: bool = False
     # True inside any comprehension node (GeneratorExp/ListComp/SetComp/DictComp)
     in_comprehension: bool = False
     # True inside ClassDef.body but NOT inside a nested function/lambda
@@ -287,6 +300,17 @@ class AstGenerator:
     ) -> Context:
         return context
 
+    def context_after(
+        self,
+        context: Context,
+        child_context: Context,
+        node: NodeRef,
+        attr: str,
+        index: int | None,
+        value: GeneratedValue,
+    ) -> None:
+        return None
+
     def attr_order(self, ast_type_name: str, field_names: list[str]) -> list[str]:
         """Return the order in which the fields of *ast_type_name* are generated.
 
@@ -315,7 +339,9 @@ class AstGenerator:
         result = self.fix_result(result)
         return result
 
-    def attr_length_provider(self, parent_node: NodeRef):
+    def attr_length_provider(
+        self, parent_node: NodeRef, context: Context | None = None
+    ):
         ast_type_name = type(parent_node.node).__name__
         ranges = {}
         depth = parent_node.depth()
@@ -353,6 +379,7 @@ class AstGenerator:
         child_parent_node: NodeRef,
         quantity: str,
         new_node: NodeRef,
+        context: Context | None = None,
     ) -> bool:
         return "?" in quantity and self.none_allowed(child_parent_node) and self.cnd()
 
@@ -369,11 +396,10 @@ class AstGenerator:
         new_result = info.ast_type.__new__(info.ast_type)
         new_node = place(new_result)
 
-        attr_length = self.attr_length_provider(new_node)
+        attr_length = self.attr_length_provider(new_node, context)
 
         for attr_name in self.attr_order(ast_type_name, list(info.fields.keys())):
             node_type, quantity = info.fields[attr_name]
-            child_context = self.context_before(context, new_node, attr_name, None)
 
             if "*" in quantity:
                 setattr(new_result, attr_name, [])
@@ -389,43 +415,49 @@ class AstGenerator:
                     setattr(new_result, attr_name, node)
                     return NodeRef(new_node, attr_name, None, node)
 
+            def store_fixed_child(index: int | None, child_context: Context) -> None:
+                value = getattr(new_result, attr_name, None)
+                if isinstance(value, list):
+                    fixed = self.fix(
+                        value[index],  # type: ignore[index]
+                        new_node.new_child(value[index], attr_name, index),  # type: ignore[index]
+                        child_context,
+                    )
+                    value[index] = fixed  # type: ignore[index]
+                else:
+                    fixed = self.fix(
+                        value, new_node.new_child(value, attr_name), child_context
+                    )
+                    setattr(new_result, attr_name, fixed)
+                self.context_after(
+                    context, child_context, new_node, attr_name, index, fixed
+                )
+
             def gen():
                 if "*" in quantity:
                     current_idx = len(getattr(new_result, attr_name))
                     child_parent_node = new_node.unknown_attr(attr_name, current_idx)
                 else:
+                    current_idx = None
                     child_parent_node = new_node.unknown_attr(attr_name)
-                if self._should_place_none(child_parent_node, quantity, new_node):
+                child_context = self.context_before(
+                    context, new_node, attr_name, current_idx
+                )
+                if self._should_place_none(
+                    child_parent_node, quantity, new_node, child_context
+                ):
                     child_place(None)
                 else:
                     self.generate_impl(
                         child_place, child_parent_node, node_type, depth, child_context
                     )
+                store_fixed_child(current_idx, child_context)
 
             if "*" in quantity:
                 for _ in range(attr_length(attr_name, stop)):
                     gen()
             else:
                 gen()
-
-            value = getattr(new_result, attr_name, None)
-            if isinstance(value, list):
-                setattr(
-                    new_result,
-                    attr_name,
-                    [
-                        self.fix(v, new_node.new_child(v, attr_name, i), child_context)
-                        for i, v in enumerate(value)
-                    ],
-                )
-            else:
-                setattr(
-                    new_result,
-                    attr_name,
-                    self.fix(
-                        value, new_node.new_child(value, attr_name), child_context
-                    ),
-                )
 
     def generate_UnionNodeType(
         self,
