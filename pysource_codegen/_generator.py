@@ -33,7 +33,8 @@ class Context:
     Requires Python 3.10+ (dataclass slots=True).
     """
 
-    in_async_code: bool = False
+    # True in positions where an Await expression can be used.
+    can_await: bool = False
     in_async_context: bool = False
     in_loop: bool = False
     # True inside FunctionDef/AsyncFunctionDef/Lambda body (reset at ClassDef body)
@@ -146,13 +147,6 @@ class Context:
     in_typed_func_annotation_in_class: bool = (
         False  # True when inside AsyncFunctionDef.body (transitively through comprehensions),
     )
-    # cleared at FunctionDef/Lambda/ClassDef body boundaries.  Unlike in_async_context,
-    # this flag is NEVER cleared when entering comprehension nodes on any Python version.
-    # Used to distinguish "in_async_code because of AsyncFunctionDef" from
-    # "in_async_code because of GeneratorExp.elt": the latter should NOT propagate
-    # into nested DictComp/SetComp/ListComp scopes (which are their own function
-    # objects and are not async unless their first comprehension uses `async for`).
-    in_async_function_scope: bool = False
 
     def copy(self) -> Context:
         new = Context.__new__(Context)

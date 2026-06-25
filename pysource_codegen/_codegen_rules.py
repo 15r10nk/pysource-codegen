@@ -356,7 +356,7 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if not context.in_async_code:
+        if not context.can_await:
             raise Invalid
         return None
 
@@ -370,7 +370,7 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if not context.in_async_code:
+        if not context.can_await:
             raise Invalid
         return None
 
@@ -384,68 +384,7 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if not context.in_async_code:
-            # await is also valid in a GeneratorExp's inner scope:
-            # - any comprehension's ifs clause
-            # - non-first comprehension's iter (generators[1:].iter)
-            in_genexp_inner = (
-                p_type == "comprehension"
-                and gpar is not None
-                and type(gpar.node).__name__ == "GeneratorExp"
-                and (
-                    p_attr == "ifs"
-                    or (
-                        p_attr == "iter"
-                        and par.parent_attr_index is not None
-                        and par.parent_attr_index > 0
-                    )
-                )
-            )
-            # On <3.14, AnnAssign.annotation inside a function body is
-            # evaluated inside the function's own scope, so the Python
-            # compiler accepts `await` there even for sync functions.
-            # However, this only works when there IS a function frame — at
-            # module level or in a class body await is still a SyntaxError.
-            # (arg.annotation and returns are evaluated in the *enclosing*
-            # scope — NOT covered here; they always forbid await below.)
-            in_unevaluated_annotation = (
-                not py314plus
-                and context.in_function
-                and (
-                    context.in_ann_assign_annotation
-                    or context.in_comprehension_in_ann_assign_annotation
-                )
-            )
-            if not in_genexp_inner and not in_unevaluated_annotation:
-                raise Invalid
-            # in_genexp_inner positions are inside the generator's own implicit
-            # function scope.  Annotation-scope restrictions from the surrounding
-            # code (e.g. ClassDef.bases/keywords) do not apply there, just as
-            # they do not apply inside GeneratorExp.elt (see context_before).
-            return None
-        # arg.annotation and FunctionDef/AsyncFunctionDef.returns are always
-        # evaluated in the *enclosing* scope of the function being defined, not
-        # inside the function body.  If the enclosing scope is NOT async, await
-        # is a SyntaxError there (already handled above in the not-in_async_code
-        # branch).  If it IS async (in_async_code=True), await is valid on <3.14
-        # but becomes a SyntaxError on 3.14+ (PEP 649 lazy annotation code objects).
-        if py312plus and context.in_type_scope:
-            # SyntaxError in type scopes (TypeAlias.value, TypeVar.bound, type-param
-            # default_value): no async function frame exists to await in.
-            raise Invalid
-        if py314plus and (
-            context.in_annotation_return_scope
-            or context.in_comprehension_in_annotation_return_scope
-            or context.in_ann_assign_annotation
-            or context.in_comprehension_in_ann_assign_annotation
-        ):
-            # PEP 649 (3.14+): arg.annotation, returns, and AnnAssign.annotation become
-            # lazy code objects, making await a SyntaxError there.  This also covers
-            # await inside a comprehension inside those positions, because the
-            # comprehension's implicit async code object would sit inside a non-async
-            # annotation code object → "asynchronous comprehension outside of an
-            # asynchronous function".
-            # ClassDef.bases/keywords are still eagerly evaluated, so await is allowed.
+        if not context.can_await:
             raise Invalid
         return None
 
@@ -986,7 +925,7 @@ class StdGenerator(AstGenerator):
     ) -> float | None:
         if not context.in_function:
             raise Invalid
-        if context.in_async_code:
+        if context.can_await:
             # yield from is a SyntaxError in async functions, EXCEPT inside
             # AnnAssign.annotation on <3.14 where annotations are evaluated in
             # the function's own scope.  (arg.annotation / returns are evaluated
@@ -1064,50 +1003,72 @@ class StdGenerator(AstGenerator):
                 ctx.match_or_required_names = frozenset()
                 ctx.in_match_case_pattern = True
 
-        # --- in_async_code ---
-        # GeneratorExp.elt is included to allow `await` in the elt of an async
-        # genexp (e.g. `(await x async for x in y)`). The comprehension rejection
-        # checks (DictComp/GeneratorExp/ListComp/SetComp) do NOT use this flag
-        # because: async comprehensions in annotation scopes are already prevented
-        # by probability_try_AsyncFor (which requires in_async_code=True, but
-        # annotation attrs are generated *before* AsyncFunctionDef.body sets it).
-        if not ctx.in_async_code and (node_type, attr) in (
-            ("AsyncFunctionDef", "body"),
-            ("GeneratorExp", "elt"),
+        # --- can_await ---
+        # True exactly in child positions where an Await expression can be used.
+        # Besides async function bodies, GeneratorExp has two implicit async-capable
+        # scopes: its elt and the inner comprehension scope (ifs and non-first iter).
+        is_generator_exp_inner_scope = (
+            node_type == "comprehension"
+            and node.parent is not None
+            and type(node.parent.node).__name__ == "GeneratorExp"
+            and (
+                attr == "ifs"
+                or (
+                    attr == "iter"
+                    and node.parent_attr_index is not None
+                    and node.parent_attr_index > 0
+                )
+            )
+        )
+        is_function_annassign_annotation = (
+            not py314plus
+            and context.in_function
+            and (node_type, attr) == ("AnnAssign", "annotation")
+        )
+        if (
+            (node_type, attr)
+            in (
+                ("AsyncFunctionDef", "body"),
+                ("GeneratorExp", "elt"),
+            )
+            or is_generator_exp_inner_scope
+            or is_function_annassign_annotation
         ):
-            ctx.in_async_code = True
-        elif ctx.in_async_code and (
+            ctx.can_await = True
+        elif (
             (attr == "body" and node_type in ("FunctionDef", "Lambda", "ClassDef"))
             or (node_type, attr)
             in (
+                ("TypeAlias", "value"),
+                ("TypeVar", "bound"),
                 ("TypeVar", "default_value"),
                 ("TypeVarTuple", "default_value"),
                 ("ParamSpec", "default_value"),
             )
-            # DictComp/SetComp/ListComp each create their own implicit function scope.
-            # If in_async_code was set by GeneratorExp.elt (not by an actual
-            # AsyncFunctionDef), that flag must NOT flow into these nested scopes
-            # on Python <3.11: `await` inside their comprehensions is only valid when
-            # an async function frame is actually present on those versions (SyntaxError:
-            # "asynchronous comprehension outside of an asynchronous function").
-            # On 3.11+, CPython relaxed the restriction and allows await in
-            # nested comprehensions inside GeneratorExp.elt even without an async
-            # function frame, so we only apply this clearing on <3.11.
             or (
-                not ctx.in_async_function_scope
+                py314plus
+                and (node_type, attr)
+                in (
+                    ("FunctionDef", "returns"),
+                    ("AsyncFunctionDef", "returns"),
+                    ("arg", "annotation"),
+                    ("AnnAssign", "annotation"),
+                )
+            )
+            # DictComp/SetComp/ListComp each create their own implicit function scope.
+            # If can_await came from GeneratorExp.elt (not from an async function or
+            # a pre-3.14 function AnnAssign.annotation), it must not flow into these
+            # nested scopes on Python <3.11.
+            or (
+                ctx.can_await
+                and not context.in_async_context
+                and not context.in_ann_assign_annotation
+                and not context.in_comprehension_in_ann_assign_annotation
                 and not py311plus
                 and node_type in ("DictComp", "SetComp", "ListComp")
             )
         ):
-            ctx.in_async_code = False
-
-        # --- in_async_function_scope: True inside AsyncFunctionDef.body, persists
-        #     through comprehension boundaries (unlike in_async_context on 3.8-3.10).
-        #     Used above to gate in_async_code propagation into nested comprehensions.
-        if node_type == "AsyncFunctionDef" and attr == "body":
-            ctx.in_async_function_scope = True
-        elif attr == "body" and node_type in ("FunctionDef", "Lambda", "ClassDef"):
-            ctx.in_async_function_scope = False
+            ctx.can_await = False
 
         # --- in_async_context (stricter: only AsyncFunctionDef.body activates) ---
         if node_type == "AsyncFunctionDef" and attr == "body":
