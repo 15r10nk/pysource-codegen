@@ -562,8 +562,8 @@ class AstGenerator:
         depth += 1
         self.nodes += 1
 
-        if depth > 100:
-            exit()
+        # if depth > 100:
+        #     exit()
 
         stop = depth > self.depth_limit or self.nodes > self.node_limit
 
