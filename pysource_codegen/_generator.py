@@ -203,10 +203,12 @@ class NodeRef:
         return parent.new_child(child_node, self.parent_attr, self.parent_attr_index)
 
     def depth(self):
-        if self.parent is None:
-            return 0
-        else:
-            return self.parent.depth() + 1
+        n = self
+        i = 0
+        while n.parent is not None:
+            i += 1
+            n = n.parent
+        return i
 
     def __repr__(self):
         return self._path() + f": {type(self.node).__name__}"
@@ -482,7 +484,14 @@ class AstGenerator:
 
         options = dict(options_list)
         if stop:
-            for final in ("Name", "MatchValue", "Pass"):
+            for final in (
+                "Name",
+                "MatchValue",
+                "MatchSingleton",
+                "Constant",
+                "MatchAs",
+                "Pass",
+            ):
                 if options.get(final, 0) != 0:
                     options = {final: 1}
                     break
