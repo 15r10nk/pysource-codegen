@@ -57,7 +57,11 @@ def try_seed(i: int) -> tuple[str, str] | None:
     if _found.is_set():
         return None
     kind = kinds[i % len(kinds)]
-    result = generators[kind](i)
+    try:
+        result = generators[kind](i)
+    except BaseException as e:
+        raise RuntimeError(f"generation error for seed {i}") from e
+
     if result and result is not True:  # True = early-exit (generation bug), no sample
         _found.set()
         return (kind, result)
@@ -106,6 +110,7 @@ if __name__ == "__main__":
         if result:
             kind, content = result
             save_sample(kind, content)
+        exit()
     else:
 
         class SeedsPerSecColumn(ProgressColumn):

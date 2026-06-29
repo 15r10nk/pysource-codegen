@@ -296,12 +296,23 @@ class StdGenerator(AstGenerator):
             # TODO: find all allowed key types
             raise Invalid
 
-        if context.in_match_value and child_name not in (
+        if p_info == ("MatchValue", "value") and child_name not in (
             "Attribute",
             "Name",
             "Constant",
             "UnaryOp",
-            "USub",
+        ):
+            raise Invalid
+
+        if (
+            node.has_parents([("MatchValue", "value"), ("UnaryOp", "op")])
+            and child_name != "USub"
+        ):
+            raise Invalid
+
+        if (
+            node.has_parents([("MatchValue", "value"), ("UnaryOp", "operand")])
+            and child_name != "Constant"
         ):
             raise Invalid
 

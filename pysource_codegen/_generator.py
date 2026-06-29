@@ -178,8 +178,20 @@ class NodeRef:
             return []
         else:
             return self.parent.all_parents() + [
-                (type(self.parent.node).__name__, self.parent_attr),
+                self.parent_signature(),
             ]
+
+    def parent_signature(self) -> tuple[str, str]:
+        return (type(self.parent.node).__name__, self.parent_attr)
+
+    def has_parents(self, parents: list[tuple[str, str]]):
+        if not parents:
+            return True
+        if self.parent is None:
+            return False
+        if parents[-1] == self.parent_signature():
+            return self.parent.has_parents(parents[:-1])
+        return False
 
     def is_node(self, node):
         assert self.node is None, self
