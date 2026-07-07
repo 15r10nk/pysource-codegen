@@ -1329,10 +1329,8 @@ class StdGenerator(AstGenerator):
         # --- in_delete_target: inside Delete.targets, cleared once inside sub-expression ---
         if node_type == "Delete" and attr == "targets":
             ctx.in_delete_target = True
-        elif ctx.in_delete_target and (node_type, attr) in (
-            ("Subscript", "value"),
-            ("Subscript", "slice"),
-            ("Attribute", "value"),
+        elif ctx.in_delete_target and not (
+            node_type in ("Tuple", "List") and attr == "elts"
         ):
             ctx.in_delete_target = False
 
@@ -1569,6 +1567,13 @@ class StdGenerator(AstGenerator):
                 node.module is None and (node.level is None or node.level == 0)
             ):
                 node.level = 1
+
+        if isinstance(node, (ast.ImportFrom, ast.Import)):
+            if self.use():
+                node.is_lazy = int(bool(node.is_lazy))
+
+            if self.use(node.is_lazy and type(parent_node.node) is not ast.Module):
+                node.is_lazy = 0
 
         if isinstance(node, ast.ExceptHandler):
             if self.use(node.type is None):
