@@ -1487,11 +1487,12 @@ class StdGenerator(AstGenerator):
         )
         self._add_match_used_names(context, child_context.match_used_names)
 
-    def fix(self, node: ast.AST, parent_node: NodeRef, context: Context) -> ast.AST:
-        p_attr = parent_node.parent_attr
+    def fix(self, node: ast.AST, node_ref: NodeRef, context: Context) -> ast.AST:
+        p_attr = node_ref.parent_attr
+
         p_type = (
-            type(parent_node.parent.node).__name__
-            if parent_node.parent is not None and parent_node.parent.node is not None
+            type(node_ref.parent.node).__name__
+            if node_ref.parent is not None and node_ref.parent.node is not None
             else ""
         )
         p_info = (p_type, p_attr)
@@ -1568,12 +1569,19 @@ class StdGenerator(AstGenerator):
             ):
                 node.level = 1
 
-        if isinstance(node, (ast.ImportFrom, ast.Import)):
-            if self.use():
-                node.is_lazy = int(bool(node.is_lazy))
+        if sys.version_info >= (3, 15):
+            if isinstance(node, (ast.ImportFrom, ast.Import)):
+                if self.use():
+                    node.is_lazy = int(bool(node.is_lazy))
 
-            if self.use(node.is_lazy and type(parent_node.node) is not ast.Module):
-                node.is_lazy = 0
+                if self.use(
+                    node.is_lazy
+                    and (
+                        node_ref.parent is None
+                        or type(node_ref.parent.node) is not ast.Module
+                    )
+                ):
+                    node.is_lazy = 0
 
         if isinstance(node, ast.ExceptHandler):
             if self.use(node.type is None):
@@ -1681,12 +1689,12 @@ class StdGenerator(AstGenerator):
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
-                and parent_node.parent.parent_attr == "format_spec"
-                and parent_node.parent.parent is not None
-                and isinstance(parent_node.parent.parent.node, ast.FormattedValue)
+                and node_ref.parent.parent_attr == "format_spec"
+                and node_ref.parent.parent is not None
+                and isinstance(node_ref.parent.parent.node, ast.FormattedValue)
                 and any(
                     isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes))
-                    for n in ast.walk(parent_node.parent.parent.node.value)
+                    for n in ast.walk(node_ref.parent.parent.node.value)
                 )
                 and isinstance(node.value, str)
                 and "'''" in node.value
