@@ -64,8 +64,7 @@ def x_test_example():
     assert is_valid_ast(tree)
 
 
-def generate_invalid_ast(seed):
-
+def _find_invalid_ast(seed):
     tree = generate_ast(seed, depth_limit=9)
     try:
         assert is_valid_ast(tree, print)
@@ -77,49 +76,68 @@ def generate_invalid_ast(seed):
         return True
 
     if not does_compile(tree):
-        last_checked_tree = tree
+        return tree
+    return None
 
-        def checker(tree):
-            nonlocal last_checked_tree
 
-            bug_found = not does_compile(tree) and is_valid_ast(tree)
-            if bug_found:
-                last_checked_tree = tree
+def probe_invalid_ast(seed):
+    tree = _find_invalid_ast(seed)
+    if tree is True:
+        return None
+    return tree
 
-            return bug_found
 
-        try:
-            new_tree = minimize_ast(tree, checker)
-        except:
-            print(f"error happend while minimize_ast seed={seed}")
-            print(ast_dump(last_checked_tree))
-            raise
+def minimize_invalid_ast(seed, tree):
+    last_checked_tree = tree
 
-        info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:\n"
-        info += "from ast import *\n"
-        info += f"tree = {ast_dump(new_tree)}\n"
-        source = ""
-        comment = ""
-        comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
+    def checker(tree):
+        nonlocal last_checked_tree
 
-        t = TestBase()
-        t.setUp()
+        bug_found = not does_compile(tree) and is_valid_ast(tree)
+        if bug_found:
+            last_checked_tree = tree
 
-        assert not t.does_compile(new_tree)
+        return bug_found
 
-        comment += "\n".join(t.details)
+    try:
+        new_tree = minimize_ast(tree, checker)
+    except:
+        print(f"error happend while minimize_ast seed={seed}")
+        print(ast_dump(last_checked_tree))
+        raise
 
-        try:
-            source = unparse(new_tree)
-        except Exception as e:
-            comment += f"\nError during unparse:\n    {e!r}"
-        else:
-            comment += f"Source:\n{source}\n\n"
+    info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:\n"
+    info += "from ast import *\n"
+    info += f"tree = {ast_dump(new_tree)}\n"
+    comment = ""
+    comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
 
-        info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
+    t = TestBase()
+    t.setUp()
 
-        return info
-    return False
+    assert not t.does_compile(new_tree)
+
+    comment += "\n".join(t.details)
+
+    try:
+        source = unparse(new_tree)
+    except Exception as e:
+        comment += f"\nError during unparse:\n    {e!r}"
+    else:
+        comment += f"Source:\n{source}\n\n"
+
+    info += "\n" + textwrap.indent(comment, "# ", lambda l: True)
+
+    return info
+
+
+def generate_invalid_ast(seed):
+    tree = _find_invalid_ast(seed)
+    if tree is True:
+        return True
+    if tree is None:
+        return False
+    return minimize_invalid_ast(seed, tree)
 
 
 if __name__ == "__main__":
