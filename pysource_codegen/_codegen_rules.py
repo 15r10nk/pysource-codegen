@@ -163,13 +163,19 @@ class StdGenerator(AstGenerator):
         )
 
     def _split_required_match_names(
-        self, context: Context, attr: str, index: int | None
+        self, context: Context, node: NodeRef, attr: str, index: int | None
     ) -> frozenset[str]:
         remaining = self._remaining_pattern_names(context)
         if not remaining:
             return frozenset()
 
         if attr == "patterns":
+            if isinstance(node.node, ast.MatchMapping):
+                rest = getattr(node.node, "rest", None)
+                if rest is None and hasattr(self, "target"):
+                    rest = getattr(node.relocate(self.target).node, "rest", None)  # type: ignore[attr-defined]
+                if rest in remaining:
+                    return remaining - frozenset({rest})
             return remaining
         if attr == "kwd_patterns":
             return remaining
@@ -1006,7 +1012,7 @@ class StdGenerator(AstGenerator):
                 "MatchClass",
             ):
                 ctx.match_required_names = self._split_required_match_names(
-                    context, attr, index
+                    context, node, attr, index
                 )
                 ctx.match_used_names = frozenset()
                 ctx.in_match_or_pattern = context.in_match_or_pattern
@@ -1476,6 +1482,13 @@ class StdGenerator(AstGenerator):
             self._add_match_used_names(child_context, (value,))
 
         if (type(node.node).__name__, attr) == ("match_case", "pattern"):
+            if isinstance(value, ast.AST):
+                # fix() can rewrite a pattern after the child context recorded
+                # planned captures, so reconcile against the final node.
+                names = self._pattern_bound_names(value)
+                child_context.match_case_names = names
+                child_context.match_required_names = names
+                child_context.match_used_names = names
             if child_context.match_used_names != child_context.match_case_names:
                 raise Invalid
 
@@ -1904,7 +1917,7 @@ class StdGenerator(AstGenerator):
                 def can_literal_eval(node):
                     try:
                         hash(ast.literal_eval(node))
-                    except ValueError:
+                    except ValueError, TypeError:
                         return False
                     return True
 
