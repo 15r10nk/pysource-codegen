@@ -151,15 +151,15 @@ hatch run types:check
 - `tests/valid_source_samples/*.py` — each file contains a short Python snippet.  The test parses it and asserts `is_valid_ast(tree) == True`.
 - `tests/invalid_ast_samples/*.py` — each file contains `tree = <ast literal>`.  The test asserts `is_valid_ast(tree) == does_compile(tree)` (invalid ASTs that fail `compile()` must also be rejected by the checker).
 
-### Generating new samples
+### find_new_issue
 
-```bash
-pytest --generate-samples
+``` bash
+uv run -p 3.15 find_new_issue.py --num-seeds 20
 ```
 
-`conftest.py` will run `generate_invalid_ast` in a multiprocessing pool for 5 minutes and save any found bugs as new samples.
-
----
+can be used to find with fuzzing new issues in pysource-codegen itself.
+new issues should be fixed in one commit.
+problems with the unparsing should be fixed in vendor/ast_decompiler (with a test-case and seperate commit)
 
 ## Adding / Changing Rules
 
