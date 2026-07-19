@@ -45,6 +45,8 @@ class Context:
     in_finally: bool = False
     # True inside TryStar.handlers (reset at function boundary)
     in_trystar_handler: bool = False
+    # True where a lazy import may be placed
+    in_lazy_import: bool = True
     # True inside a MatchValue node
     in_match_value: bool = False
     # True inside MatchValue.value AND also inside Attribute.value

@@ -1340,6 +1340,12 @@ class StdGenerator(AstGenerator):
         ):
             ctx.in_delete_target = False
 
+        if node_type in ("Try", "TryStar") or (
+            attr == "body"
+            and node_type in ("FunctionDef", "AsyncFunctionDef", "ClassDef")
+        ):
+            ctx.in_lazy_import = False
+
         # --- in_type_scope: inside TypeAlias.value or TypeVar.bound or type_param default_value ---
         if (node_type, attr) in (
             ("TypeAlias", "value"),
@@ -1587,7 +1593,7 @@ class StdGenerator(AstGenerator):
                 if self.use():
                     node.is_lazy = int(bool(node.is_lazy))
 
-                if self.use(node.is_lazy and context.in_function_or_class):
+                if self.use(node.is_lazy and not context.in_lazy_import):
                     node.is_lazy = 0
 
         if isinstance(node, ast.ExceptHandler):
