@@ -1587,13 +1587,7 @@ class StdGenerator(AstGenerator):
                 if self.use():
                     node.is_lazy = int(bool(node.is_lazy))
 
-                if self.use(
-                    node.is_lazy
-                    and (
-                        node_ref.parent is None
-                        or type(node_ref.parent.node) is not ast.Module
-                    )
-                ):
+                if self.use(node.is_lazy and context.in_function_or_class):
                     node.is_lazy = 0
 
         if isinstance(node, ast.ExceptHandler):
@@ -1917,7 +1911,7 @@ class StdGenerator(AstGenerator):
                 def can_literal_eval(node):
                     try:
                         hash(ast.literal_eval(node))
-                    except ValueError, TypeError:
+                    except (ValueError, TypeError):
                         return False
                     return True
 
