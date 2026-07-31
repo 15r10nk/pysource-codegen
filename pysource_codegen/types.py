@@ -10,7 +10,10 @@ from typing import Union
 
 @dataclass
 class NodeType:
-    fields: Dict[str, Tuple[str, Union[Literal["?"], Literal["*"], Literal[""]]]]
+    fields: Dict[
+        str,
+        Tuple[str, Literal["?", "*", ""]],
+    ]
     ast_type: Type[ast.AST]
 
 
