@@ -9,7 +9,6 @@ from .types import BuiltinNodeType
 from .types import NodeType
 from .types import UnionNodeType
 
-
 type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {}
 
 
