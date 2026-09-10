@@ -21,7 +21,13 @@ from typing import Callable, Hashable, Iterator, List, TypeVar, Union, Any
 # element type so the alias can be recursive.
 Value = Union[ast.AST, List["Value"], str, int, float, bytes, bool, None]
 
-from ast_decompiler import decompile as unparse
+# Prefer the vendored fork (pysource-codegen/vendor/ast_decompiler).
+# It provides better fidelity for round-tripping certain AST constructs than ast.unparse().
+try:
+    from ast_decompiler import decompile as unparse
+except ImportError:
+    import ast
+    unparse = ast.unparse
 
 
 def ast_dump(node: ast.AST | list[ast.AST]) -> str:

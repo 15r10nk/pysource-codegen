@@ -27,12 +27,12 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
-"ast-decompiler >=0.8.0",
-"typing-extensions>=4.7.1"
+    "ast-decompiler>=0.8.0",
+    "typing-extensions>=4.7.1"
 ]
 
 [tool.uv.sources]
-ast-decompiler = { workspace=true }
+ast-decompiler = { path = "vendor/ast_decompiler" }
 
 [project.urls]
 Documentation = "https://github.com/15r10nk/pysource-codegen#readme"
