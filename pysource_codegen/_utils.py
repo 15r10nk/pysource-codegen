@@ -27,6 +27,7 @@ try:
     from ast_decompiler import decompile as unparse
 except ImportError:
     import ast
+
     unparse = ast.unparse
 
 

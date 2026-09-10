@@ -13,7 +13,7 @@ from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 
-from pysource_minimize import minimize  # Unresolved, comment out for now
+from pysource_minimize import minimize
 
 from .test_invalid_ast import does_compile
 
