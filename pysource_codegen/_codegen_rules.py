@@ -162,6 +162,22 @@ class StdGenerator(AstGenerator):
             and isinstance(node.parent.parent.node, ast.MatchOr)  # type: ignore[union-attr]
         )
 
+    def _match_or_slot_has_later_alternatives(self, node: NodeRef) -> bool:
+        if (
+            not py310plus
+            or node.parent_attr != "patterns"
+            or node.parent_attr_index is None
+            or node.parent is None
+            or not isinstance(node.parent.node, ast.MatchOr)
+        ):
+            return False
+
+        match_or = node.parent.node
+        if hasattr(self, "target"):
+            match_or = node.parent.relocate(self.target).node  # type: ignore[attr-defined]
+
+        return node.parent_attr_index < len(match_or.patterns) - 1  # type: ignore[union-attr]
+
     def _split_required_match_names(
         self, context: Context, node: NodeRef, attr: str, index: int | None
     ) -> frozenset[str]:
@@ -682,7 +698,11 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if context.in_match_or_pattern and not self._remaining_pattern_names(context):
+        if (
+            context.in_match_or_pattern
+            and not self._remaining_pattern_names(context)
+            and self._match_or_slot_has_later_alternatives(node)
+        ):
             raise Invalid
         return None
 
