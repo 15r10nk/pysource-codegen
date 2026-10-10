@@ -9,6 +9,7 @@ from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
+from pysource_codegen._utils import ast_literal
 from pysource_minimize._minimize import minimize_ast
 from .TestBase import TestBase
 
@@ -108,7 +109,7 @@ def minimize_invalid_ast(seed, tree):
 
     info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:\n"
     info += "from ast import *\n"
-    info += f"tree = {ast_dump(new_tree)}\n"
+    info += f"tree = {ast_literal(new_tree)}\n"
     comment = ""
     comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
 

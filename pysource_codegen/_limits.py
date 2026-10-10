@@ -1,3 +1,17 @@
+import ast
+import sys
+
+
+def has_template_not_equal_parser_bug() -> bool:
+    if sys.version_info < (3, 14):
+        return False
+    tree = ast.parse("t'{0 != 0:}'", mode="eval")
+    return tree.body.values[0].str != "0 != 0"
+
+
+template_not_equal_parser_bug = has_template_not_equal_parser_bug()
+
+
 def calc_f_string_expr_limit() -> int:
     n = 0
     s = "1"

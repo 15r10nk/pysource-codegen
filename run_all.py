@@ -90,7 +90,7 @@ versions = sorted(
 def run_test(version):
     env = os.environ.copy()
     project_path = str(Path(__file__).parent)
-    ast_decompiler_path = str(Path(__file__).parent / "vendor" / "ast_decompiler")
+    ast_decompiler_path = str(Path(__file__).parent.parent / "ast_decompiler")
     pythonpath = os.pathsep.join([project_path, ast_decompiler_path])
     if env.get("PYTHONPATH"):
         env["PYTHONPATH"] = pythonpath + os.pathsep + env["PYTHONPATH"]

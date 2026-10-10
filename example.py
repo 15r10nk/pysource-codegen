@@ -1,6 +1,7 @@
-a = {}
-n = (1, 2)
+import ast
 
-a[*n,]: int = 5
+x = ast.Constant(value=5)
 
-print(a)
+print(ast.dump(ast.keyword(value=x)))
+
+print(ast.dump(ast.keyword(arg=None, value=x)))

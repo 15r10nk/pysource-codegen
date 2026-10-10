@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import ast
 import sys
+import typing
 
 __all__ = [
     "ast_dump",
+    "ast_literal",
     "arguments",
     "walk_until",
     "walk_childs_first",
@@ -21,7 +23,7 @@ from typing import Callable, Hashable, Iterator, List, TypeVar, Union, Any
 # element type so the alias can be recursive.
 Value = Union[ast.AST, List["Value"], str, int, float, bytes, bool, None]
 
-# Prefer the vendored fork (pysource-codegen/vendor/ast_decompiler).
+# Prefer the sibling checkout used for local development.
 # It provides better fidelity for round-tripping certain AST constructs than ast.unparse().
 try:
     from ast_decompiler import decompile as unparse
@@ -41,6 +43,50 @@ def ast_dump(node: ast.AST | list[ast.AST]) -> str:
     if sys.version_info >= (3, 9):
         return ast.dump(node, indent=2)
     return ast.dump(node)
+
+
+_MISSING = object()
+
+
+def _field_is_optional(node: ast.AST, field: str) -> bool:
+    field_types = getattr(type(node), "_field_types", {})
+    field_type = field_types.get(field)
+    return type(None) in typing.get_args(field_type)
+
+
+def ast_literal(value: Value, indent: int = 0) -> str:
+    prefix = "  " * indent
+    next_prefix = "  " * (indent + 1)
+
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        items = ",\n".join(
+            next_prefix + ast_literal(item, indent + 1) for item in value
+        )
+        return f"[\n{items}\n{prefix}]"
+
+    if not isinstance(value, ast.AST):
+        return repr(value)
+
+    fields = []
+    for field in value._fields:
+        field_value = getattr(value, field, _MISSING)
+        if field_value is _MISSING:
+            if _field_is_optional(value, field):
+                field_value = None
+            else:
+                continue
+        fields.append((field, field_value))
+
+    if not fields:
+        return f"{type(value).__name__}()"
+
+    rendered = ",\n".join(
+        f"{next_prefix}{field}={ast_literal(field_value, indent + 1)}"
+        for field, field_value in fields
+    )
+    return f"{type(value).__name__}(\n{rendered}\n{prefix})"
 
 
 def arguments(

@@ -5,12 +5,14 @@
 # ]
 #
 # [tool.uv.sources]
-# ast-decompiler = { path = "vendor/ast_decompiler" }
+# ast-decompiler = { path = "../ast_decompiler" }
 # ///
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import itertools
 import multiprocessing.synchronize
 import os
@@ -32,10 +34,11 @@ from rich.progress import ProgressColumn
 from rich.progress import SpinnerColumn
 from rich.progress import TaskProgressColumn
 from rich.progress import TextColumn
+from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 from rich.text import Text
 
-sys.path.insert(1, str(Path(__file__).parent / "vendor" / "ast_decompiler"))
+sys.path.insert(1, str(Path(__file__).parent.parent / "ast_decompiler"))
 sys.path.append(str(Path(__file__).parent.parent / "pysource-minimize" / "src"))
 
 from tests.test_invalid_ast import minimize_invalid_ast
@@ -79,14 +82,27 @@ def multiprocessing_context() -> multiprocessing.context.BaseContext:
     return multiprocessing.get_context()
 
 
-def try_seed(seed: int) -> FoundIssue | None:
+def try_seed(seed: int, quiet: bool = False) -> FoundIssue | None:
     if _found.is_set():
         return None
     kind = kinds[seed % len(kinds)]
+    stdout = io.StringIO()
+    stderr = io.StringIO()
     try:
-        result = algorithms[kind].probe(seed)
+        if quiet:
+            stream_context = contextlib.redirect_stdout(stdout)
+            error_context = contextlib.redirect_stderr(stderr)
+        else:
+            stream_context = contextlib.nullcontext()
+            error_context = contextlib.nullcontext()
+        with stream_context, error_context:
+            result = algorithms[kind].probe(seed)
     except BaseException as e:
-        raise RuntimeError(f"generation error for seed {seed}") from e
+        output = stdout.getvalue() + stderr.getvalue()
+        message = f"generation error for seed {seed}"
+        if output:
+            message += f"\nworker output:\n{output}"
+        raise RuntimeError(message) from e
 
     if result is not None:
         _found.set()
@@ -96,6 +112,25 @@ def try_seed(seed: int) -> FoundIssue | None:
 
 def minimize_issue(issue: FoundIssue) -> str:
     return algorithms[issue.kind].minimize(issue.seed, issue.payload)
+
+
+def minimize_issue_with_progress(issue: FoundIssue) -> str:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn(f"[bold blue]minimize {issue.kind} seed {issue.seed}"),
+        TimeElapsedColumn(),
+    ) as progress:
+        progress.add_task("", total=None)
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                return minimize_issue(issue)
+        except BaseException:
+            output = stdout.getvalue() + stderr.getvalue()
+            if output:
+                print(output)
+            raise
 
 
 if __name__ == "__main__":
@@ -157,21 +192,36 @@ if __name__ == "__main__":
             while True:
                 yield randrange(10_000_000_000)
 
+        def progress_columns():
+            if args.num_seeds is None:
+                return (
+                    SpinnerColumn(),
+                    TextColumn("[bold blue]find-new-issue"),
+                    TextColumn("[progress.completed]{task.completed} seeds"),
+                    TextColumn("{task.fields[active]}/{task.fields[workers]} active"),
+                    TimeElapsedColumn(),
+                    SeedsPerSecColumn(),
+                )
+            return (
+                SpinnerColumn(),
+                TextColumn("[bold blue]find-new-issue"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TaskProgressColumn(),
+                TimeRemainingColumn(),
+                TextColumn("{task.fields[active]}/{task.fields[workers]} active"),
+                SeedsPerSecColumn(),
+            )
+
         mp_context = multiprocessing_context()
         found = mp_context.Event()
         issue: FoundIssue | None = None
-        worker_count = args.workers or 1
+        worker_count = max(args.workers or 1, 1)
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[bold blue]find-new-issue"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TaskProgressColumn(),
-            TimeRemainingColumn(),
-            SeedsPerSecColumn(),
-        ) as progress:
-            task = progress.add_task("", total=args.num_seeds)
+        with Progress(*progress_columns()) as progress:
+            task = progress.add_task(
+                "", total=args.num_seeds, active=0, workers=worker_count
+            )
 
             executor = ProcessPoolExecutor(
                 max_workers=worker_count,
@@ -180,25 +230,46 @@ if __name__ == "__main__":
                 initargs=(found,),
             )
             interrupted = False
+            failed = False
             try:
                 seed_stream = itertools.islice(random_seeds(), args.num_seeds)
-                pending = {
-                    executor.submit(try_seed, s)
-                    for s in itertools.islice(seed_stream, worker_count)
-                }
+                pending = {}
+
+                def submit_seed(seed: int) -> None:
+                    pending[executor.submit(try_seed, seed, True)] = seed
+                    progress.update(task, active=len(pending))
+
+                for seed in itertools.islice(seed_stream, worker_count):
+                    submit_seed(seed)
+
                 try:
                     while pending:
-                        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                        done, _ = wait(pending, return_when=FIRST_COMPLETED)
                         for future in done:
-                            progress.advance(task)
-                            if issue := future.result():
+                            pending.pop(future)
+                            try:
+                                result = future.result()
+                            except BaseException:
+                                failed = True
+                                found.set()
+                                progress.advance(task)
+                                progress.update(task, active=len(pending))
+                                for pending_future in pending:
+                                    pending_future.cancel()
+                                pending.clear()
+                                raise
+                            else:
+                                progress.advance(task)
+                                progress.update(task, active=len(pending))
+                            if issue := result:
                                 found.set()
                                 for pending_future in pending:
                                     pending_future.cancel()
                                 pending.clear()
+                                progress.update(task, active=0)
                                 break
                             if (s := next(seed_stream, None)) is not None:
-                                pending.add(executor.submit(try_seed, s))
+                                submit_seed(s)
                 except KeyboardInterrupt:
                     found.set()  # signal workers to stop early
                     interrupted = True
@@ -206,7 +277,7 @@ if __name__ == "__main__":
                     print("\nInterrupted.")
                     raise SystemExit(1)
             finally:
-                if (issue is not None or interrupted) and hasattr(
+                if (issue is not None or interrupted or failed) and hasattr(
                     executor, "terminate_workers"
                 ):
                     executor.terminate_workers()
@@ -214,5 +285,5 @@ if __name__ == "__main__":
                     executor.shutdown(wait=False, cancel_futures=True)
 
         if issue:
-            content = minimize_issue(issue)
+            content = minimize_issue_with_progress(issue)
             save_sample(issue.kind, content)

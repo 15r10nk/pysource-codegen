@@ -33,11 +33,26 @@ class TestBase(unittest.TestCase):
             for e in ast.walk(new_tree):
                 if hasattr(e, "type_ignores"):
                     e.type_ignores = []
-                if isinstance(e,ast.Constant):
-                    if isinstance(e.value,str):
-                        e.value=e.value.replace("'","_").replace("\"","_")
-                    if isinstance(e.value,bytes):
-                        e.value=e.value.replace(b"'",b"_").replace(b"\"",b"_")
+                if isinstance(e, ast.Constant):
+                    if isinstance(e.value, str):
+                        e.value = e.value.replace("'", "_").replace('"', "_")
+                    if isinstance(e.value, bytes):
+                        e.value = e.value.replace(b"'", b"_").replace(b'"', b"_")
+            if sys.version_info >= (3, 14):
+                for e in ast.walk(new_tree):
+                    if isinstance(e, ast.Interpolation):
+                        f_str = ast.JoinedStr(
+                            [
+                                ast.FormattedValue(
+                                    value=e.value, conversion=-1, format_spec=None
+                                )
+                            ]
+                        )
+                        f_str_repr = unparse(f_str)
+                        if f_str_repr.startswith(("f'''", 'f"""')):
+                            e.str = f_str_repr[5:-4]
+                        else:
+                            e.str = f_str_repr[3:-2]
             if not equal_ast(
                 ast.parse(unparse(new_tree)), new_tree, self.addDetail, "tree"
             ):

@@ -6,6 +6,7 @@ from typing import Iterable
 
 from ._limits import f_string_expr_limit
 from ._limits import f_string_format_limit
+from ._limits import template_not_equal_parser_bug
 from ._utils import arguments
 from ._utils import only_firstone
 from ._utils import unique_by
@@ -223,7 +224,9 @@ class StdGenerator(AstGenerator):
             and isinstance(child_parent_node.parent.node, ast.MatchAs)  # type: ignore[union-attr]
         ):
             if self._is_direct_match_or_alternative(child_parent_node.parent):  # type: ignore[arg-type]
-                return False
+                return not self._match_or_slot_has_later_alternatives(
+                    child_parent_node.parent
+                ) and self.none_allowed(child_parent_node)
             return not self._remaining_pattern_names(context or Context())
 
         return super()._should_place_none(
@@ -2175,7 +2178,8 @@ class StdGenerator(AstGenerator):
                         n.str = unparse(f_str)[3:-2]  # strip f"{...}"
 
                 if self.use(
-                    isinstance(n, ast.Interpolation)
+                    template_not_equal_parser_bug
+                    and isinstance(n, ast.Interpolation)
                     and n.format_spec is not None
                     and n.conversion == -1
                     and isinstance(n.str, str)

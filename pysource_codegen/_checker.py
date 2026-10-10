@@ -13,12 +13,20 @@ class _InvalidTree(Exception):
 class AstChecker(StdGenerator):
 
     def check(self, tree: ast.AST, print=lambda *a: None) -> bool:
+        if not self._has_required_runtime_fields(tree):
+            return False
         self.target = tree
         try:
             new_tree = self.generate(type(tree).__name__)
         except (_InvalidTree, AttributeError, IndexError, Invalid):
             return False
         return equal_ast(tree, new_tree, print)
+
+    def _has_required_runtime_fields(self, tree: ast.AST) -> bool:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.keyword) and "arg" not in node.__dict__:
+                return False
+        return True
 
     @property
     def rand(self):
