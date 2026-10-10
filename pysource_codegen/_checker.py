@@ -32,6 +32,23 @@ class AstChecker(StdGenerator):
     def rand(self):
         assert False
 
+    def _split_required_match_names(self, context, node, attr, index):
+        target = node.relocate(self.target).node
+        value = getattr(target, attr)
+        if index is not None:
+            value = value[index]
+        if attr in ("name", "rest"):
+            names = frozenset() if value is None else frozenset({value})
+        elif attr in ("pattern", "patterns", "kwd_patterns"):
+            names = self._pattern_bound_names(value)
+        else:
+            names = frozenset()
+        # Replay the target's distribution of captures across children instead
+        # of requiring the first child to bind every remaining name.
+        if not names <= self._remaining_pattern_names(context):
+            raise _InvalidTree()
+        return names
+
     def probability(self, parent_node, type_name, context) -> float:
         original = super().probability(parent_node, type_name, context)
 
