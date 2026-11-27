@@ -485,6 +485,25 @@ def fix(node: ast.AST, parents: list[tuple[str, str]]):
         if use() and node.module == None and (node.level == None or node.level == 0):
             node.level = 1
 
+    if (
+        sys.version_info >= (3, 15)
+        and isinstance(node, (ast.Import, ast.ImportFrom))
+        and node.is_lazy
+        and use()
+    ):
+        # Keep the import, but make it eager where CPython forbids lazy imports.
+        if any(
+            parent in ("ClassDef", "FunctionDef", "AsyncFunctionDef", "Try", "TryStar")
+            for parent, _ in parents
+        ) or (
+            isinstance(node, ast.ImportFrom)
+            and (
+                (node.level == 0 and node.module == "__future__")
+                or any(alias.name == "*" for alias in node.names)
+            )
+        ):
+            node.is_lazy = 0
+
     if isinstance(node, ast.ExceptHandler):
         if use() and node.type is None:
             node.name = None
