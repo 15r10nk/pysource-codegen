@@ -24,6 +24,20 @@ py312plus = (3, 12) <= sys.version_info
 
 comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 
+allowed_starred_parents = {
+    ("Tuple", "elts"),
+    ("Call", "args"),
+    ("List", "elts"),
+    ("Set", "elts"),
+    ("ClassDef", "bases"),
+}
+if sys.version_info >= (3, 15):
+    allowed_starred_parents |= {
+        ("ListComp", "elt"),
+        ("SetComp", "elt"),
+        ("GeneratorExp", "elt"),
+    }
+
 InterpolationOrFormattedValue = (ast.FormattedValue,)
 if sys.version_info >= (3, 14):
     InterpolationOrFormattedValue += (ast.Interpolation,)
@@ -254,20 +268,8 @@ def probability_try(parents, child_name):
     if child_name == "MatchStar" and parent_types[-1] != "MatchSequence":
         raise Invalid
 
-    if child_name == "Starred":
-        parent = parents[-1]
-        if parent not in (
-            ("Tuple", "elts"),
-            ("Call", "args"),
-            ("List", "elts"),
-            ("Set", "elts"),
-            ("ClassDef", "bases"),
-        ) and not (
-            sys.version_info >= (3, 15)
-            and parent
-            in (("ListComp", "elt"), ("SetComp", "elt"), ("GeneratorExp", "elt"))
-        ):
-            raise Invalid
+    if child_name == "Starred" and parents[-1] not in allowed_starred_parents:
+        raise Invalid
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
