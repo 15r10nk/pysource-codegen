@@ -254,14 +254,20 @@ def probability_try(parents, child_name):
     if child_name == "MatchStar" and parent_types[-1] != "MatchSequence":
         raise Invalid
 
-    if child_name == "Starred" and parents[-1] not in (
-        ("Tuple", "elts"),
-        ("Call", "args"),
-        ("List", "elts"),
-        ("Set", "elts"),
-        ("ClassDef", "bases"),
-    ):
-        raise Invalid
+    if child_name == "Starred":
+        parent = parents[-1]
+        if parent not in (
+            ("Tuple", "elts"),
+            ("Call", "args"),
+            ("List", "elts"),
+            ("Set", "elts"),
+            ("ClassDef", "bases"),
+        ) and not (
+            sys.version_info >= (3, 15)
+            and parent
+            in (("ListComp", "elt"), ("SetComp", "elt"), ("GeneratorExp", "elt"))
+        ):
+            raise Invalid
 
     assign_target = ("Subscript", "Attribute", "Name", "Starred", "List", "Tuple")
 
