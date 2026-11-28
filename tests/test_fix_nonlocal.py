@@ -5,7 +5,6 @@ from typing import Any
 
 from pysource_codegen._codegen_rules import StdGenerator
 
-
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
 try:
@@ -76,12 +75,10 @@ def test_global_0() -> None:
 def a(x):
     global x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def a(x):
     pass
-"""
-        ),
+"""),
     )
 
 
@@ -92,13 +89,11 @@ def a():
     x = 0
     global x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def a():
     x = 0
     pass
-"""
-        ),
+"""),
     )
 
 
@@ -109,13 +104,11 @@ def a():
     print(x)
     global x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def a():
     print(x)
     pass
-"""
-        ),
+"""),
     )
 
 
@@ -126,13 +119,11 @@ def a():
     x:int
     global x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def a():
     x: int
     pass
-"""
-        ),
+"""),
     )
 
 
@@ -146,16 +137,14 @@ def a():
         nonlocal x
         global x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def a():
     x = 5
 
     def b():
         nonlocal x
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -166,13 +155,11 @@ def name_4():
     global name_3
     name_3: int
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def name_4():
     global name_3
     pass
-"""
-        ),
+"""),
     )
 
 
@@ -183,14 +170,12 @@ def b():
     def a():
         nonlocal x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def b():
 
     def a():
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -202,15 +187,13 @@ def b():
     def a(x):
         nonlocal x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def b():
     x = 0
 
     def a(x):
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -223,16 +206,14 @@ def b():
         print(x)
         nonlocal x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def b():
     x = 0
 
     def a():
         print(x)
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -245,16 +226,14 @@ def b():
         x=5
         nonlocal x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def b():
     x = 0
 
     def a():
         x = 5
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -267,16 +246,14 @@ def b():
         x:int
         nonlocal x
     """,
-        snapshot(
-            """\
+        snapshot("""\
 def b():
     x = 0
 
     def a():
         x: int
         pass
-"""
-        ),
+"""),
     )
 
 
@@ -289,13 +266,11 @@ def b():
     def a[x:int]():
         nonlocal x
     """,
-            snapshot(
-                """\
+            snapshot("""\
 def b():
     x = 0
 
     def a[x: int]():
         pass
-"""
-            ),
+"""),
         )
