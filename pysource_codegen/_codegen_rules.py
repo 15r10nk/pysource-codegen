@@ -1467,7 +1467,8 @@ class StdGenerator(AstGenerator):
             context.in_type_scope or context.in_comprehension_in_type_scope
         ):
             ctx.in_comprehension_in_type_scope = True
-        elif is_function_def or node_type == "ClassDef":
+        elif attr == "body" and (is_function_def or node_type == "ClassDef"):
+            # Defaults are evaluated in the surrounding comprehension/type scope.
             ctx.in_comprehension_in_type_scope = False
 
         # --- in_comprehension_in_ann_assign_annotation: inside a SetComp/ListComp/DictComp
