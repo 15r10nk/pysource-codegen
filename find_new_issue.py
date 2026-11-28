@@ -30,10 +30,10 @@ from typing import Callable
 sys.path.insert(1, str(Path(__file__).parent.parent / "ast_decompiler"))
 sys.path.append(str(Path(__file__).parent.parent / "pysource-minimize" / "src"))
 
-from tests.test_invalid_ast import minimize_invalid_ast
-from tests.test_invalid_ast import probe_invalid_ast
-from tests.test_valid_source import minimize_valid_source
-from tests.test_valid_source import probe_valid_source
+from tests.find_invalid_ast import minimize_invalid_ast
+from tests.find_invalid_ast import probe_invalid_ast
+from tests.find_valid_source import minimize_valid_source
+from tests.find_valid_source import probe_valid_source
 
 
 @dataclass

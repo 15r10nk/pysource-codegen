@@ -5,54 +5,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pysource_codegen._codegen_rules import StdGenerator
-from pysource_codegen._generator import Invalid
-
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
 from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 from pysource_codegen._codegen import unparse
-
+from pysource_codegen._codegen_rules import StdGenerator
+from pysource_codegen._generator import Invalid
 from pysource_minimize import minimize
 
-from .test_invalid_ast import does_compile
-
-sample_dir = Path(__file__).parent / "valid_source_samples"
-sample_dir.mkdir(exist_ok=True)
-
-
-from .TestBase import TestBase
-
-
-class TestValidSource(TestBase):
-    pass
-
-
-def gen_test(name: str, file: Path) -> None:
-    def test_valid_source(self: TestValidSource) -> None:
-        code: str = file.read_text()
-
-        try:
-            tree: ast.Module = ast.parse(code)
-        except Exception:
-            return
-
-        self.addDetail(ast.dump(tree))
-
-        if not self.does_compile(tree):
-            self.addDetail("the following code should be invalid:\n" + code)
-            self.assertFalse(is_valid_ast(tree, self.addDetail), msg=self.message())
-            return
-
-        self.addDetail("the following code should be valid:\n" + code)
-        self.assertTrue(is_valid_ast(tree, self.addDetail), msg=self.message())
-
-    setattr(TestValidSource, "test_valid_source_" + name, test_valid_source)
-
-
-for file in sample_dir.glob("*.py"):
-    gen_test(file.stem, file)
+from ._validation import is_valid_python
 
 
 def source_bug_found(code: str) -> bool:
@@ -61,7 +23,7 @@ def source_bug_found(code: str) -> bool:
     except Exception:
         return False
 
-    if not does_compile(tree):
+    if not is_valid_python(tree):
         return False
 
     return not is_valid_ast(tree)

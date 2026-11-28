@@ -522,7 +522,7 @@ class AstGenerator:
             for option in info.options
         ]
 
-        # check if an invalid can actually be valid (test_valid_source.py)
+        # check if an invalid can actually be valid (tests/find_valid_source.py)
         invalid_option = [
             option for (option, prop) in options_list if prop == 0 and not self.use()
         ]

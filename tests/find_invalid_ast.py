@@ -14,69 +14,27 @@ from pysource_codegen._codegen import unparse
 from pysource_codegen._utils import ast_dump
 from pysource_codegen._utils import ast_literal
 from pysource_minimize._minimize import minimize_ast
-from .TestBase import TestBase
 
-sample_dir = Path(__file__).parent / "invalid_ast_samples"
-sample_dir.mkdir(exist_ok=True)
-
-
-class TestInvalidAst(TestBase):
-    pass
-
-
-does_compile = TestInvalidAst().does_compile
-
-
-def gen_test(name, file):
-    def test_invalid_ast(self):
-        code = file.read_text()
-        self.addDetail("code:\n```\n" + code + "\n```")
-        globals = {}
-        try:
-            exec(code, globals)
-        except (NameError, ImportError) as e:
-
-            return  # pytest.skip(f"wrong python version {e}")
-
-        tree = globals["tree"]
-
-        for node in ast.walk(tree):
-            for field in node._fields:
-                if not hasattr(node, field):
-                    return  # pytest.skip( f"wrong python version {node.__class__.__name__} is missing .{field}")
-            if sys.version_info < (3, 8) and isinstance(node, ast.Constant):
-                return  # pytest.skip(f"ast.Constant can not be unparsed on python3.7")
-
-        self.assertEqual(
-            is_valid_ast(tree, self.addDetail),
-            self.does_compile(tree),
-            msg=self.message(),
-        )
-
-    setattr(TestInvalidAst, "test_" + name, test_invalid_ast)
-
-
-for file in sample_dir.glob("*.py"):
-    gen_test(file.stem, file)
+from ._validation import is_valid_python
 
 
 @dataclass
 class AstIssue:
-    """A generated module that its checker rejects or that fails compilation."""
+    """A generated module that its checker rejects or that fails Python validation."""
 
     tree: ast.Module
     checker_accepts: bool
-    compiles: bool
+    valid_python: bool
 
 
 def probe_invalid_ast(seed: int) -> AstIssue | None:
     tree = generate_ast(seed, depth_limit=9)
     assert isinstance(tree, ast.Module)
     checker_accepts = is_valid_ast(tree)
-    compiles = does_compile(tree)
-    if checker_accepts and compiles:
+    valid_python = is_valid_python(tree)
+    if checker_accepts and valid_python:
         return None
-    return AstIssue(tree, checker_accepts, compiles)
+    return AstIssue(tree, checker_accepts, valid_python)
 
 
 def minimize_invalid_ast(seed: int, issue: AstIssue) -> str:
@@ -90,7 +48,7 @@ def minimize_invalid_ast(seed: int, issue: AstIssue) -> str:
             return False
         # Keep checker rejections distinct from accepted, uncompilable trees.
         bug_found = (
-            does_compile(tree) == issue.compiles
+            is_valid_python(tree) == issue.valid_python
             and is_valid_ast(tree) == issue.checker_accepts
         )
         if bug_found:
@@ -107,24 +65,24 @@ def minimize_invalid_ast(seed: int, issue: AstIssue) -> str:
         raise
 
     if issue.checker_accepts:
-        info = "# The checker accepts this generated AST, but it does not compile.\n"
+        info = "# The checker accepts this generated AST, but it fails compilation or AST round-trip.\n"
     else:
         info = "# The generator produced an AST rejected by its checker.\n"
     info += "from ast import *\n"
     info += f"tree = {ast_literal(new_tree)}\n"
     comment = ""
     comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
-    comment += (
-        f"checker accepts: {issue.checker_accepts}\ncompiles: {issue.compiles}\n\n"
-    )
+    comment += f"checker accepts: {issue.checker_accepts}\nvalid_python: {issue.valid_python}\n\n"
 
-    t = TestBase()
-    t.setUp()
+    details: list[str] = []
 
-    assert t.does_compile(new_tree) == issue.compiles
+    def add_detail(*items: object) -> None:
+        details.append(" ".join(map(str, items)))
+
+    assert is_valid_python(new_tree, add_detail) == issue.valid_python
     assert is_valid_ast(new_tree) == issue.checker_accepts
 
-    comment += "\n".join(t.details)
+    comment += "\n".join(details)
 
     try:
         source = unparse(new_tree)

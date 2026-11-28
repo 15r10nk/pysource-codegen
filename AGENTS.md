@@ -35,13 +35,12 @@ pysource_codegen/         # Main package
     legacy.py             # Placeholder Rules subclass
 
 tests/
-  test_valid_source.py    # Assert is_valid_ast(parse(file)) == True for every sample
-  test_invalid_ast.py     # Assert is_valid_ast(tree) == does_compile(tree) for samples
-  test_fix_nonlocal.py    # Tests for nonlocal / scoping fixes
-  conftest.py             # pytest hooks; --generate-samples flag for producing new samples
-  TestBase.py             # Base test class with addDetail / message helpers
-  valid_source_samples/   # .py files that must parse and be accepted by is_valid_ast
-  invalid_ast_samples/    # .py files defining `tree = …` with known-bad ASTs
+  test_samples.py        # One sample runner for source and AST fixtures
+  _validation.py         # Shared compilation and normalized AST round-trip predicate
+  find_invalid_ast.py    # Search/minimize generated AST failures
+  find_valid_source.py   # Search/minimize valid source rejected by the checker
+  valid_source_samples/  # Source fixtures; validity is determined per Python version
+  invalid_ast_samples/   # AST-construction fixtures defining `tree = ...`
 
 find_new_issue.py         # Script to brute-force find seeds that trigger bugs
 run_all.py                # Run tests across multiple Python versions
@@ -126,7 +125,7 @@ A deterministic checker built on top of `StdGenerator`.  Given an existing `tree
 
 ### `is_valid_ast`  (`_codegen.py`)
 
-Runs both the legacy `StdGenerator.is_valid_ast` walk and the new `AstChecker.check`, cross-checks them, and returns the `AstChecker` result.
+Delegates to `AstChecker.check`. The independent test oracle is `tests._validation.is_valid_python`.
 
 ---
 
@@ -148,8 +147,28 @@ hatch run types:check
 
 ### Sample-based tests
 
-- `tests/valid_source_samples/*.py` — each file contains a short Python snippet.  The test parses it and asserts `is_valid_ast(tree) == True`.
-- `tests/invalid_ast_samples/*.py` — each file contains `tree = <ast literal>`.  The test asserts `is_valid_ast(tree) == does_compile(tree)` (invalid ASTs that fail `compile()` must also be rejected by the checker).
+All regression tests use standalone source or AST samples. Do not add fixed-seed,
+mock-based, or implementation-specific regression tests. Preserve edge cases as
+samples instead.
+
+`TestSamples` loads both directories and always compares
+`is_valid_ast(tree) == is_valid_python(tree)`. Directory names describe the
+sample's origin, not its expected validity: the same sample may be valid on one
+Python version and invalid on another.
+
+`is_valid_python` requires the original AST and its generated source to compile,
+and a normalized `unparse`/`parse` round-trip to preserve the AST. Existing quote,
+type-ignore, and template-text normalizations remain part of this definition.
+Represented Python programs are never executed. AST fixtures are evaluated only
+to construct their trees.
+
+Source syntax and AST node classes unavailable on a Python version are reported
+as explicit skips because there is no tree to replay. Missing required AST fields
+are checked as invalid inputs, not silently skipped.
+
+The two search/minimization paths share this predicate. Generator/checker
+mismatches are reported as findings; minimization preserves both the Python
+validity and checker result.
 
 ### find_new_issue
 

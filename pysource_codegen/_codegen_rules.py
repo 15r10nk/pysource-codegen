@@ -94,7 +94,7 @@ class StdGenerator(AstGenerator):
         returns ``condition`` directly, so ``use(False)`` short-circuits a
         fix-up whose guard is already ``False`` without consuming a probe slot.
 
-        In the test suite (``test_valid_source``) it is mocked so that it
+        During valid-source search (``tests.find_valid_source``) it is overridden so that it
         returns ``False`` exactly **once** per generation run *and only when
         ``condition`` is ``True``*, systematically skipping each reachable
         fix-up in turn.  The resulting AST is then:
@@ -1670,7 +1670,7 @@ class StdGenerator(AstGenerator):
             #   ExtSlice([Slice(a,b)])      → unparse "a[a:b]"   → parse Slice(a,b)
             #   ExtSlice([Index(x),Index(y)])→ unparse "a[x, y]" → parse Index(Tuple)
             # Normalise to the canonical form so the generator never emits a tree
-            # that does_compile would reject for this reason, and the checker
+            # that is_valid_python would reject for this reason, and the checker
             # correctly marks such trees as invalid.
             dims = node.dims  # type: ignore[attr-defined]
             # A dim may be Index, Slice, or (illegally) a nested ExtSlice.
