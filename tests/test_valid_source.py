@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from pysource_codegen._codegen_rules import StdGenerator
+from pysource_codegen._generator import Invalid
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
 
@@ -95,11 +96,18 @@ def probe_valid_source(seed: int) -> str | None:
                     ignored_something = True
                 return not ignore
 
-        tree = generate_ast(
-            seed, node_limit=200, depth_limit=5, generator_type=TestGenerator
-        )
-
-        ignore_index += 1
+        try:
+            tree = generate_ast(
+                seed, node_limit=200, depth_limit=5, generator_type=TestGenerator
+            )
+        except Invalid:
+            # Skipping a rule can make the remaining capture budget impossible.
+            # Keep exploring, but surface failures in unmodified generation.
+            if not ignored_something:
+                raise
+            continue
+        finally:
+            ignore_index += 1
 
         try:
             code = unparse(tree)

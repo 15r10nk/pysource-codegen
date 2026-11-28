@@ -94,6 +94,8 @@ Abstract base class for generation.  Subclasses override hooks:
 | `same_length()` | Declare which attribute pairs must have the same list length (e.g. `Compare.ops` / `Compare.comparators`) |
 | `min_attr_length(type_name, attr_name)` | Minimum list length for an attribute |
 | `none_allowed(parent, parents)` | Whether a `?`-quantity field may be `None` here |
+| `allowed_placements(child, quantity, context)` | Shared allowed decisions for fields (`Placement.CHILD` or `Placement.NONE`) |
+| `prepare_node(node, context, attr_length, stop)` | Plan capture-bearing child slots using the chosen list lengths |
 | `use()` | Guard hook for optional fix-up steps (mocked in tests to explore edge cases) |
 | `_should_place_none(child_node_ref, quantity, parent_node, parents)` | Whether to place `None` for an optional field (overridden in `AstChecker`) |
 | `attr_length_provider(parent_node)` | Returns a closure `(attr_name, stop) → int` for list lengths |
@@ -117,7 +119,8 @@ A deterministic checker built on top of `StdGenerator`.  Given an existing `tree
 
 - `probability` returns 1 for the matching type, 0 for everything else.  If the match type has probability 0 according to `StdGenerator`, raises `_InvalidTree`.
 - `attr_length_provider` reads lengths directly from the target tree, enforcing `same_length` constraints.
-- `_should_place_none` checks whether the target field is actually `None`.
+- `_should_place_none` checks whether the target field is actually `None` and validates that decision against the shared `allowed_placements` rules.
+- `_choose_match_names` reads capture allocations from the target; the inherited `_split_required_match_names` validates them using the same bounds as random generation.
 - `generate_BuiltinNodeType` copies the leaf value from the target.
 - Invalid trees (wrong lengths, missing attributes, etc.) surface as `_InvalidTree`, `AttributeError`, or `IndexError` → `check()` returns `False`.
 
@@ -169,6 +172,8 @@ problems with the unparsing should be fixed in vendor/ast_decompiler (with a tes
 4. **List-length constraints** go in `StdGenerator.same_length` (and in `AstChecker.attr_length_provider` which reads them automatically).
 
 5. **New AST node types** must be added to `static_type_info.py` with the correct `NodeType` / `UnionNodeType` entries.  The `_deleteTargets` pseudo-union is an example of a synthetic union used to restrict which node types may appear in a specific position.
+
+6. **Pattern captures** use shared allocation bounds and post-placement checks in `StdGenerator`. Override selection hooks in `AstChecker`, not the validation rules. Duplicate captures, inconsistent OR alternatives, and unfulfilled capture budgets raise `Invalid` in both paths.
 
 ---
 

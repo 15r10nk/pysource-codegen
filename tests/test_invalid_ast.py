@@ -57,14 +57,6 @@ for file in sample_dir.glob("*.py"):
     gen_test(file.stem, file)
 
 
-def x_test_example():
-    seed = 2273381
-    tree = generate_ast(seed)
-    tree = generate_ast(seed, depth_limit=9)
-    # print(ast.dump(tree, indent=2))
-    assert is_valid_ast(tree)
-
-
 def _find_invalid_ast(seed):
     tree = generate_ast(seed, depth_limit=9)
     try:

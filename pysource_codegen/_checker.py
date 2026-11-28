@@ -3,6 +3,7 @@ import ast
 from pysource_codegen._codegen_rules import StdGenerator
 from pysource_codegen._generator import Invalid
 from pysource_codegen._generator import NodeRef
+from pysource_codegen._generator import Placement
 from pysource_codegen._utils import equal_ast
 
 
@@ -32,22 +33,18 @@ class AstChecker(StdGenerator):
     def rand(self):
         assert False
 
-    def _split_required_match_names(self, context, node, attr, index):
+    def _planned_match_case_names(self, node):
+        target_case = node.relocate(self.target).node
+        return self._pattern_bound_names(target_case.pattern)
+
+    def _choose_match_names(self, node, attr, index, remaining, minimum, maximum):
         target = node.relocate(self.target).node
         value = getattr(target, attr)
         if index is not None:
             value = value[index]
         if attr in ("name", "rest"):
-            names = frozenset() if value is None else frozenset({value})
-        elif attr in ("pattern", "patterns", "kwd_patterns"):
-            names = self._pattern_bound_names(value)
-        else:
-            names = frozenset()
-        # Replay the target's distribution of captures across children instead
-        # of requiring the first child to bind every remaining name.
-        if not names <= self._remaining_pattern_names(context):
-            raise _InvalidTree()
-        return names
+            return frozenset() if value is None else frozenset({value})
+        return self._pattern_bound_names(value)
 
     def probability(self, parent_node, type_name, context) -> float:
         original = super().probability(parent_node, type_name, context)
@@ -96,9 +93,10 @@ class AstChecker(StdGenerator):
         if "?" not in quantity:
             return False
         target_is_none = child_parent_node.relocate(self.target).node is None
-        # An optional field that the generator never fills with None (none_allowed=False)
-        # should not be accepted as None in the target tree either.
-        if target_is_none and not self.none_allowed(child_parent_node):
+        placement = Placement.NONE if target_is_none else Placement.CHILD
+        if placement not in self.allowed_placements(
+            child_parent_node, quantity, context
+        ):
             raise _InvalidTree()
         return target_is_none
 

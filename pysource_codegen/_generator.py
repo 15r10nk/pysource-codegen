@@ -6,6 +6,8 @@ import sys
 from dataclasses import dataclass
 from dataclasses import fields as _dc_fields
 from dataclasses import replace
+from enum import auto
+from enum import Enum
 from typing import Callable
 from typing import Union
 
@@ -20,6 +22,11 @@ GeneratedValue = Union[ast.AST, str, int, float, bytes, bool, None]
 
 class Invalid(Exception):
     pass
+
+
+class Placement(Enum):
+    CHILD = auto()
+    NONE = auto()
 
 
 _dataclass_slots: dict = {"slots": True} if sys.version_info >= (3, 10) else {}
@@ -55,19 +62,22 @@ class Context:
     in_match_value_unaryop: bool = False
     # True inside MatchClass.cls
     in_match_class_cls: bool = False
-    # Capture names planned for the current match_case pattern
-    match_case_names: frozenset[str] = frozenset()
     # Capture names that still need to be bound in the current pattern subtree
     match_required_names: frozenset[str] = frozenset()
     # Capture names already bound while generating the current pattern subtree
     match_used_names: frozenset[str] = frozenset()
     # True while generating a direct MatchOr alternative pattern
     in_match_or_pattern: bool = False
-    # Node id and frozen required names for the current MatchOr alternatives
-    match_or_node_id: int | None = None
+    # Frozen required names shared by the current MatchOr alternatives
     match_or_required_names: frozenset[str] = frozenset()
     # True while generating a match_case pattern, even when no names are planned
     in_match_case_pattern: bool = False
+    # Capture-bearing child slots of the node currently being assembled.
+    match_capture_slots: tuple[tuple[str, int | None], ...] = ()
+    # Planned length of the nearest OR pattern's alternatives.
+    match_or_pattern_count: int = 0
+    # Whether the enclosing MatchAs still has a capture available for its name.
+    match_as_has_name: bool = False
     # True inside any comprehension node (GeneratorExp/ListComp/SetComp/DictComp)
     in_comprehension: bool = False
     # True inside ClassDef.body but NOT inside a nested function/lambda
@@ -387,6 +397,26 @@ class AstGenerator:
 
         return attr_length
 
+    def prepare_node(
+        self,
+        node: NodeRef,
+        context: Context,
+        attr_length: Callable[[str, bool], int],
+        stop: bool,
+    ) -> None:
+        """Plan child constraints once list lengths are available."""
+
+    def allowed_placements(
+        self,
+        child: NodeRef,
+        quantity: str,
+        context: Context | None = None,
+    ) -> tuple[Placement, ...]:
+        """Return whether a child value, None, or either may be placed."""
+        if "?" in quantity and self.none_allowed(child):
+            return (Placement.CHILD, Placement.NONE)
+        return (Placement.CHILD,)
+
     def _should_place_none(
         self,
         child_parent_node: NodeRef,
@@ -394,7 +424,10 @@ class AstGenerator:
         new_node: NodeRef,
         context: Context | None = None,
     ) -> bool:
-        return "?" in quantity and self.none_allowed(child_parent_node) and self.cnd()
+        placements = self.allowed_placements(child_parent_node, quantity, context)
+        if len(placements) == 1:
+            return placements[0] is Placement.NONE
+        return self.cnd()
 
     def generate_NodeType(
         self,
@@ -410,6 +443,7 @@ class AstGenerator:
         new_node = place(new_result)
 
         attr_length = self.attr_length_provider(new_node, context)
+        self.prepare_node(new_node, context, attr_length, stop)
 
         for attr_name in self.attr_order(ast_type_name, list(info.fields.keys())):
             node_type, quantity = info.fields[attr_name]

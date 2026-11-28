@@ -43,7 +43,7 @@ Source = "https://github.com/15r10nk/pysource-codegen"
 path = "pysource_codegen/__init__.py"
 
 [[tool.hatch.envs.hatch-test.matrix]]
-python=["3.9","3.10","3.11","3.12","3.13","3.14"]
+python=["3.9","3.10","3.11","3.12","3.13","3.14","3.15"]
 
 [tool.hatch.envs.hatch-test]
 extra-dependencies=[
