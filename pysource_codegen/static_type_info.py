@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import sys
 
@@ -7,7 +9,7 @@ from .types import UnionNodeType
 
 assert sys.version_info >= (3, 9)
 
-type_infos = {
+type_infos: dict[str, NodeType | BuiltinNodeType | UnionNodeType] = {
     "Delete": NodeType(
         fields={"targets": ("_deleteTargets", "*")}, ast_type=ast.Delete
     ),
@@ -442,7 +444,9 @@ if sys.version_info >= (3, 9):
     # On 3.9+, ast.parse no longer wraps subscript indices in Index/ExtSlice.
     # Subscript.slice is now any expr.  Slice is added to the expr union (but
     # probability_try_Slice still restricts it to subscript/ExtSlice.dims positions).
-    type_infos["expr"] = UnionNodeType(options=[*type_infos["expr"].options, "Slice"])
+    expr_info = type_infos["expr"]
+    assert isinstance(expr_info, UnionNodeType)
+    type_infos["expr"] = UnionNodeType(options=[*expr_info.options, "Slice"])
     type_infos["Subscript"] = NodeType(
         fields={
             "value": ("expr", ""),

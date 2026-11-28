@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import sys
+from typing import Callable
+from typing import ClassVar
 from typing import Iterable
 
 from ._limits import f_string_expr_limit
@@ -16,6 +18,7 @@ from ._utils import walk_function_nodes
 from ._utils import walk_until
 from pysource_codegen._generator import AstGenerator
 from pysource_codegen._generator import Context
+from pysource_codegen._generator import GeneratedValue
 from pysource_codegen._generator import Invalid
 from pysource_codegen._generator import NodeRef
 
@@ -31,6 +34,15 @@ comprehensions = ("GeneratorExp", "ListComp", "SetComp", "DictComp")
 InterpolationOrFormattedValue = (ast.FormattedValue,)
 if sys.version_info >= (3, 14):
     InterpolationOrFormattedValue += (ast.Interpolation,)  # type: ignore
+
+
+if sys.version_info >= (3, 14):
+    JoinedStrOrTemplateStr: tuple[type[ast.JoinedStr] | type[ast.TemplateStr], ...] = (
+        ast.JoinedStr,
+        ast.TemplateStr,
+    )
+else:
+    JoinedStrOrTemplateStr = (ast.JoinedStr,)
 
 
 def all_args(args: ast.arguments) -> tuple[list[ast.arg], ...]:
@@ -54,6 +66,24 @@ if sys.version_info >= (3, 10):
 
 
 class StdGenerator(AstGenerator):
+    _child_dispatch: ClassVar[
+        dict[
+            str,
+            Callable[
+                [
+                    StdGenerator,
+                    NodeRef,
+                    NodeRef,
+                    NodeRef | None,
+                    str,
+                    str,
+                    tuple[str, str],
+                    Context,
+                ],
+                float | None,
+            ],
+        ]
+    ]
 
     def use(self, condition: bool = True) -> bool:
         """
@@ -93,7 +123,7 @@ class StdGenerator(AstGenerator):
         return frozenset(names[: self.rand.randint(0, len(names))])
 
     def _pattern_bound_names(self, node: ast.AST | None) -> frozenset[str]:
-        if not py310plus or node is None:
+        if sys.version_info < (3, 10) or node is None:
             return frozenset()
 
         if isinstance(node, ast.MatchAs):
@@ -106,7 +136,7 @@ class StdGenerator(AstGenerator):
             return frozenset() if node.name is None else frozenset({node.name})
 
         if isinstance(node, ast.MatchMapping):
-            names: set[str] = set()
+            names = set()
             for pattern in node.patterns:
                 names.update(self._pattern_bound_names(pattern))
             if node.rest is not None:
@@ -128,11 +158,11 @@ class StdGenerator(AstGenerator):
         if isinstance(node, ast.MatchOr):
             if not node.patterns:
                 return frozenset()
-            names = self._pattern_bound_names(node.patterns[0])
+            alternative_names = self._pattern_bound_names(node.patterns[0])
             for pattern in node.patterns[1:]:
-                if self._pattern_bound_names(pattern) != names:
+                if self._pattern_bound_names(pattern) != alternative_names:
                     return frozenset()
-            return names
+            return alternative_names
 
         return frozenset()
 
@@ -143,7 +173,7 @@ class StdGenerator(AstGenerator):
         context.match_used_names = context.match_used_names | frozenset(names)
 
     def _is_match_binding_identifier(self, node: NodeRef) -> bool:
-        return py310plus and (
+        return sys.version_info >= (3, 10) and (
             (node.parent_attr == "name" and isinstance(node.parent.node, ast.MatchAs))  # type: ignore[union-attr]
             or (
                 node.parent_attr == "name"
@@ -157,7 +187,7 @@ class StdGenerator(AstGenerator):
 
     def _is_direct_match_or_alternative(self, node: NodeRef) -> bool:
         return (
-            py310plus
+            sys.version_info >= (3, 10)
             and node.parent is not None
             and node.parent.parent_attr == "patterns"
             and isinstance(node.parent.parent.node, ast.MatchOr)  # type: ignore[union-attr]
@@ -165,7 +195,7 @@ class StdGenerator(AstGenerator):
 
     def _match_or_slot_has_later_alternatives(self, node: NodeRef) -> bool:
         if (
-            not py310plus
+            sys.version_info < (3, 10)
             or node.parent_attr != "patterns"
             or node.parent_attr_index is None
             or node.parent is None
@@ -175,7 +205,9 @@ class StdGenerator(AstGenerator):
 
         match_or = node.parent.node
         if hasattr(self, "target"):
-            match_or = node.parent.relocate(self.target).node  # type: ignore[attr-defined]
+            target_match_or = node.parent.relocate(self.target).node
+            assert isinstance(target_match_or, ast.MatchOr)
+            match_or = target_match_or
 
         return node.parent_attr_index < len(match_or.patterns) - 1  # type: ignore[union-attr]
 
@@ -187,7 +219,7 @@ class StdGenerator(AstGenerator):
             return frozenset()
 
         if attr == "patterns":
-            if isinstance(node.node, ast.MatchMapping):
+            if sys.version_info >= (3, 10) and isinstance(node.node, ast.MatchMapping):
                 rest = getattr(node.node, "rest", None)
                 if rest is None and hasattr(self, "target"):
                     rest = getattr(node.relocate(self.target).node, "rest", None)  # type: ignore[attr-defined]
@@ -219,7 +251,8 @@ class StdGenerator(AstGenerator):
 
         if (
             "?" in quantity
-            and py310plus
+            and sys.version_info >= (3, 10)
+            and child_parent_node.parent is not None
             and child_parent_node.parent_attr == "pattern"
             and isinstance(child_parent_node.parent.node, ast.MatchAs)  # type: ignore[union-attr]
         ):
@@ -261,8 +294,9 @@ class StdGenerator(AstGenerator):
         self, node: NodeRef, child_name: str, context: Context
     ) -> float:
         par = node.parent
-        gpar = par.parent  # type: ignore[union-attr]
-        p_type = type(par.node).__name__  # type: ignore[union-attr]
+        assert par is not None
+        gpar = par.parent
+        p_type = type(par.node).__name__
         p_attr = node.parent_attr
         p_info = (p_type, p_attr)
 
@@ -1529,7 +1563,12 @@ class StdGenerator(AstGenerator):
         )
         self._add_match_used_names(context, child_context.match_used_names)
 
-    def fix(self, node: ast.AST, node_ref: NodeRef, context: Context) -> ast.AST:
+    def fix(
+        self, node: GeneratedValue, node_ref: NodeRef, context: Context
+    ) -> GeneratedValue:
+        if not isinstance(node, ast.AST):
+            return node
+
         p_attr = node_ref.parent_attr
 
         p_type = (
@@ -1545,11 +1584,12 @@ class StdGenerator(AstGenerator):
         if hasattr(node, "type_comment"):
             setattr(node, "type_comment", None)
 
-        if self.use(
-            py310plus
+        if (
+            sys.version_info >= (3, 10)
             and isinstance(node, ast.withitem)
             and isinstance(node.context_expr, ast.Tuple)
             and bool(node.context_expr.elts)
+            and self.use()
         ):
             # Python 3.10+ treats `with (a, b):` as multiple context managers,
             # so ast.unparse of withitem(context_expr=Tuple([a, b])) produces
@@ -1569,7 +1609,7 @@ class StdGenerator(AstGenerator):
             ):
                 node.context_expr = node.context_expr.elts[0]
 
-        if self.use(hasattr(ast, "ExtSlice") and isinstance(node, ast.ExtSlice)):
+        if hasattr(ast, "ExtSlice") and isinstance(node, ast.ExtSlice) and self.use():
             # ExtSlice only round-trips when it has ≥2 dims AND at least one is a
             # Slice.  ast.parse(ast.unparse(…)) otherwise returns a different node
             # node kind:
@@ -1579,7 +1619,7 @@ class StdGenerator(AstGenerator):
             # Normalise to the canonical form so the generator never emits a tree
             # that does_compile would reject for this reason, and the checker
             # correctly marks such trees as invalid.
-            dims = node.dims  # type: ignore[union-attr]
+            dims = node.dims  # type: ignore[attr-defined]
             # A dim may be Index, Slice, or (illegally) a nested ExtSlice.
             # Only consider dims that are all ast.Index as "collapsible"; any
             # Slice or nested ExtSlice means we must keep the outer ExtSlice.
@@ -1642,12 +1682,14 @@ class StdGenerator(AstGenerator):
                     new_elts.append(e)
             node.elts = new_elts
 
-        if self.use(
-            isinstance(node, ast.AnnAssign) and not isinstance(node.target, ast.Name)
+        if (
+            isinstance(node, ast.AnnAssign)
+            and not isinstance(node.target, ast.Name)
+            and self.use()
         ):
             node.simple = 0
 
-        if self.use(isinstance(node, ast.AnnAssign)):
+        if isinstance(node, ast.AnnAssign) and self.use():
             # ast.parse always sets simple to 0 or 1; normalize arbitrary ints
             # so the tree is stable after an unparse→parse round-trip.
             node.simple = int(bool(node.simple))
@@ -1661,11 +1703,12 @@ class StdGenerator(AstGenerator):
             if node.kind not in allowed_kind:
                 node.kind = allowed_kind[hash(node.kind) % len(allowed_kind)]
 
-            if self.use(
+            if (
                 not py312plus
                 and context.fstring_value_depth > 0
                 and isinstance(node.value, bytes)
                 and "\\" in repr(node.value)
+                and self.use()
             ):
                 # On <3.12, backslashes are forbidden inside f-string expression
                 # parts ({...}).  ast.unparse renders bytes constants via repr(),
@@ -1676,11 +1719,12 @@ class StdGenerator(AstGenerator):
                 # value whose repr() contains no backslash.
                 node.value = b" "
 
-            if self.use(
+            if (
                 not py312plus
                 and context.fstring_value_depth > 0
                 and isinstance(node.value, str)
                 and "\\" in repr(node.value)
+                and self.use()
             ):
                 # Same as the bytes case above, but for str constants.
                 # ast.unparse renders str constants via their repr, using
@@ -1691,17 +1735,18 @@ class StdGenerator(AstGenerator):
                 # Replace with a safe string whose repr() contains no backslash.
                 node.value = " "
 
-            if self.use(
+            if (
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
                 and not isinstance(node.value, str)
+                and self.use()
             ):
                 # TODO: better format string generation
                 node.value = str(node.value)
 
-            if self.use(
+            if (
                 not py312plus
                 and (
                     p_info == ("JoinedStr", "values")
@@ -1714,17 +1759,19 @@ class StdGenerator(AstGenerator):
                 # is nested inside a FormattedValue.value, the backslash ends
                 # up in the expression part of the outer f-string.
                 and context.fstring_value_depth > 0
+                and self.use()
             ):
                 # Strip backslashes so the tree is always representable.
                 # An empty result is handled by the next (empty → " ") block.
                 node.value = node.value.replace("\\", "")
 
-            if self.use(
+            if (
                 not py312plus
                 and (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
+                and node_ref.parent is not None
                 and node_ref.parent.parent_attr == "format_spec"
                 and node_ref.parent.parent is not None
                 and isinstance(node_ref.parent.parent.node, ast.FormattedValue)
@@ -1735,6 +1782,7 @@ class StdGenerator(AstGenerator):
                 and isinstance(node.value, str)
                 and "'''" in node.value
                 and '"""' in node.value
+                and self.use()
             ):
                 node.value = node.value.replace('"""', "")
 
@@ -1750,21 +1798,19 @@ class StdGenerator(AstGenerator):
                 # not round-trip.  Replace it with a single space.
                 node.value = " "
 
-            if self.use(
+            if (
                 (
                     p_info == ("JoinedStr", "values")
                     or p_info == ("TemplateStr", "values")
                 )
                 and node.kind is not None
+                and self.use()
             ):
                 # ast.parse always produces kind=None for Constant parts inside
                 # a JoinedStr/TemplateStr; the kind is lost on unparse→parse.
                 node.kind = None
 
-        if self.use(
-            isinstance(node, ast.JoinedStr)
-            or (sys.version_info >= (3, 14) and isinstance(node, ast.TemplateStr))
-        ):
+        if isinstance(node, JoinedStrOrTemplateStr) and self.use():
             # CPython's parser merges adjacent Constant string parts when
             # round-tripping through unparse→parse (e.g. [Const("'"), Const("'")]
             # becomes [Const("''")]).  Pre-merge them here so the tree is stable.
@@ -1808,13 +1854,16 @@ class StdGenerator(AstGenerator):
             else:
                 node.ctx = ast.Load()
 
-        if self.use(
-            isinstance(node, (ast.List, ast.Tuple)) and isinstance(node.ctx, ast.Store)
+        if (
+            isinstance(node, (ast.List, ast.Tuple))
+            and isinstance(node.ctx, ast.Store)
+            and self.use()
         ):
             only_firstone(node.elts, lambda e: isinstance(e, ast.Starred))
 
-        if self.use(
+        if (
             isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda))
+            and self.use()
         ):
             # unique argument names
             seen = set()
@@ -1838,7 +1887,7 @@ class StdGenerator(AstGenerator):
             arguments.kwonlyargs = arguments.kwonlyargs[:min_kw_size]
             arguments.kw_defaults = arguments.kw_defaults[:min_kw_size]
 
-        if self.use(isinstance(node, ast.AsyncFunctionDef)):
+        if isinstance(node, ast.AsyncFunctionDef) and self.use():
             if any(
                 isinstance(n, (ast.Yield, ast.YieldFrom))
                 for n in walk_function_nodes(node.body)
@@ -1847,7 +1896,7 @@ class StdGenerator(AstGenerator):
                     if isinstance(n, ast.Return):
                         n.value = None
 
-        if self.use(isinstance(node, (ast.ClassDef, ast.Call))):
+        if isinstance(node, (ast.ClassDef, ast.Call)) and self.use():
             # unique keyword names
             seen = set()
             for i, kw in reversed(list(enumerate(node.keywords))):
@@ -1856,17 +1905,18 @@ class StdGenerator(AstGenerator):
                         del node.keywords[i]
                     seen.add(kw.arg)
 
-        if self.use(isinstance(node, ast.Try)):
+        if isinstance(node, ast.Try) and self.use():
             node.handlers[:-1] = [
                 handler for handler in node.handlers[:-1] if handler.type is not None
             ]
             if self.use(not node.handlers):
                 node.orelse = []
 
-        if self.use(
+        if (
             isinstance(
                 node, (ast.GeneratorExp, ast.ListComp, ast.DictComp, ast.SetComp)
             )
+            and self.use()
         ):
             # SyntaxError: assignment expression cannot rebind comprehension iteration variable 'name_3'
             # Guard against None targets/iters: these can occur when an
@@ -1896,7 +1946,9 @@ class StdGenerator(AstGenerator):
                         return self.visit(node.value)
                     return self.generic_visit(node)
 
-            node = Transformer().visit(node)
+            transformed = Transformer().visit(node)
+            assert isinstance(transformed, ast.AST)
+            node = transformed
 
         # pattern matching
         if sys.version_info >= (3, 10):
@@ -1994,21 +2046,22 @@ class StdGenerator(AstGenerator):
             if self.use(not node.exc):
                 node.cause = None
 
-        if self.use(isinstance(node, ast.Lambda)):
+        if isinstance(node, ast.Lambda) and self.use():
             # no annotation for lambda arguments
             for args in all_args(node.args):
                 for arg in args:
                     arg.annotation = None
 
-            if self.use(node.args.vararg is not None):
+            if node.args.vararg is not None and self.use():
                 node.args.vararg.annotation = None
 
-            if self.use(node.args.kwarg is not None):
+            if node.args.kwarg is not None and self.use():
                 node.args.kwarg.annotation = None
 
-        if self.use(
+        if (
             isinstance(node, InterpolationOrFormattedValue)
             and isinstance(node.format_spec, ast.JoinedStr)
+            and self.use()
         ):
             for const in node.format_spec.values:
                 if isinstance(const, ast.Constant):
@@ -2019,7 +2072,7 @@ class StdGenerator(AstGenerator):
 
             use = self.use
             # type scopes
-            if self.use(hasattr(node, "type_params")):
+            if hasattr(node, "type_params") and self.use():
                 node.type_params = unique_by(node.type_params, lambda p: p.name)
 
             def cleanup_annotation(
@@ -2109,12 +2162,14 @@ class StdGenerator(AstGenerator):
                     node.args.vararg,
                     node.args.kwarg,
                 ]:
-                    if self.use(
-                        func_arg is not None and func_arg.annotation is not None
+                    if (
+                        func_arg is not None
+                        and func_arg.annotation is not None
+                        and self.use()
                     ):
                         func_arg.annotation = cleanup_annotation(func_arg.annotation)
 
-                if self.use(node.returns is not None):
+                if node.returns is not None and self.use():
                     node.returns = cleanup_annotation(node.returns)
 
             if isinstance(node, ast.ClassDef) and node.type_params:
@@ -2124,15 +2179,19 @@ class StdGenerator(AstGenerator):
                         kw.value = cleanup_annotation(kw.value)
 
                 for n in ast.walk(node):
-                    if self.use(isinstance(n, ast.TypeAlias)):
+                    if isinstance(n, ast.TypeAlias) and self.use():
                         n.value = cleanup_annotation(n.value)
 
             if isinstance(node, ast.ClassDef):
                 for n in ast.walk(node):
-                    if self.use(isinstance(n, ast.TypeVar) and n.bound is not None):
+                    if (
+                        isinstance(n, ast.TypeVar)
+                        and n.bound is not None
+                        and self.use()
+                    ):
                         n.bound = cleanup_annotation(n.bound)
 
-            if self.use(isinstance(node, ast.AnnAssign)):
+            if isinstance(node, ast.AnnAssign) and self.use():
                 if py314plus:
                     # PEP 649 (3.14+): walrus/yield/await at the top level of
                     # AnnAssign.annotation are now invalid (lazy code object).
@@ -2163,7 +2222,7 @@ class StdGenerator(AstGenerator):
     def fix_result(self, node: ast.AST) -> ast.AST:
         if sys.version_info >= (3, 14):
             for n in walk_childs_first(node):
-                if self.use(isinstance(n, ast.Interpolation)):
+                if isinstance(n, ast.Interpolation) and self.use():
                     f_str = ast.JoinedStr(
                         [
                             ast.FormattedValue(
@@ -2177,13 +2236,14 @@ class StdGenerator(AstGenerator):
                     else:
                         n.str = unparse(f_str)[3:-2]  # strip f"{...}"
 
-                if self.use(
+                if (
                     template_not_equal_parser_bug
                     and isinstance(n, ast.Interpolation)
                     and n.format_spec is not None
                     and n.conversion == -1
                     and isinstance(n.str, str)
                     and "!" in n.str
+                    and self.use()
                 ):
                     # CPython parser bug: when the expression text contains '!'
                     # (only possible via '!=' / NotEq) AND a format_spec is
@@ -2234,13 +2294,13 @@ class StdGenerator(AstGenerator):
                 ):
                     continue
                 # Implicit async generator: strip 'return <value>'
-                for n in walk_until(funcnode.body, _func_boundaries):  # type: ignore[arg-type]
+                for body_node in walk_until(funcnode.body, _func_boundaries):
                     if (
-                        isinstance(n, ast.Return)
-                        and n.value is not None
+                        isinstance(body_node, ast.Return)
+                        and body_node.value is not None
                         and self.use(True)
                     ):
-                        n.value = None
+                        body_node.value = None
 
         return self.fix_nonlocal(node)
 

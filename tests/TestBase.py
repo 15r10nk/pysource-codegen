@@ -57,8 +57,8 @@ class TestBase(unittest.TestCase):
                 ast.parse(unparse(new_tree)), new_tree, self.addDetail, "tree"
             ):
                 return False
-        except Exception as e:
-            print(e)
+        except Exception as error:
+            print(error)
             return False
 
         if sys.version_info >= (3, 14):
@@ -92,7 +92,9 @@ class TestBase(unittest.TestCase):
                 source = unparse(tree)
                 compile(source, "<file>", "exec")
                 compile(ast.fix_missing_locations(tree), "<file>", "exec")
-        except Exception as e:
-            self.addDetail("exception during `compile(ast.unparse(tree))`:\n" + str(e))
+        except Exception as error:
+            self.addDetail(
+                "exception during `compile(ast.unparse(tree))`:\n" + str(error)
+            )
             return False
         return True

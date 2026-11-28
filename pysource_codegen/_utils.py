@@ -25,11 +25,10 @@ Value = Union[ast.AST, List["Value"], str, int, float, bytes, bool, None]
 
 # Prefer the sibling checkout used for local development.
 # It provides better fidelity for round-tripping certain AST constructs than ast.unparse().
+unparse: Callable[[ast.AST], str]
 try:
     from ast_decompiler import decompile as unparse
 except ImportError:
-    import ast
-
     unparse = ast.unparse
 
 
@@ -54,7 +53,7 @@ def _field_is_optional(node: ast.AST, field: str) -> bool:
     return type(None) in typing.get_args(field_type)
 
 
-def ast_literal(value: Value, indent: int = 0) -> str:
+def ast_literal(value: object, indent: int = 0) -> str:
     prefix = "  " * indent
     next_prefix = "  " * (indent + 1)
 

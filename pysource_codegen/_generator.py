@@ -184,6 +184,7 @@ class NodeRef:
             ]
 
     def parent_signature(self) -> tuple[str, str]:
+        assert self.parent is not None
         return (type(self.parent.node).__name__, self.parent_attr)
 
     def has_parents(self, parents: list[tuple[str, str]]):
@@ -293,7 +294,9 @@ class AstGenerator:
     def none_allowed(self, child: NodeRef) -> bool:
         return True
 
-    def fix(self, node: ast.AST, parent: NodeRef, context: Context) -> ast.AST:
+    def fix(
+        self, node: GeneratedValue, parent: NodeRef, context: Context
+    ) -> GeneratedValue:
         return node
 
     def use(self, condition: bool = True) -> bool:
