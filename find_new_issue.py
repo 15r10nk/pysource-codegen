@@ -27,17 +27,6 @@ from random import randrange
 from typing import Any
 from typing import Callable
 
-from rich.progress import BarColumn
-from rich.progress import MofNCompleteColumn
-from rich.progress import Progress
-from rich.progress import ProgressColumn
-from rich.progress import SpinnerColumn
-from rich.progress import TaskProgressColumn
-from rich.progress import TextColumn
-from rich.progress import TimeElapsedColumn
-from rich.progress import TimeRemainingColumn
-from rich.text import Text
-
 sys.path.insert(1, str(Path(__file__).parent.parent / "ast_decompiler"))
 sys.path.append(str(Path(__file__).parent.parent / "pysource-minimize" / "src"))
 
@@ -115,6 +104,11 @@ def minimize_issue(issue: FoundIssue) -> str:
 
 
 def minimize_issue_with_progress(issue: FoundIssue) -> str:
+    from rich.progress import Progress
+    from rich.progress import SpinnerColumn
+    from rich.progress import TextColumn
+    from rich.progress import TimeElapsedColumn
+
     stdout = io.StringIO()
     stderr = io.StringIO()
     with Progress(
@@ -134,6 +128,16 @@ def minimize_issue_with_progress(issue: FoundIssue) -> str:
 
 
 if __name__ == "__main__":
+    from rich.progress import BarColumn
+    from rich.progress import MofNCompleteColumn
+    from rich.progress import Progress
+    from rich.progress import ProgressColumn
+    from rich.progress import SpinnerColumn
+    from rich.progress import TaskProgressColumn
+    from rich.progress import TextColumn
+    from rich.progress import TimeElapsedColumn
+    from rich.progress import TimeRemainingColumn
+    from rich.text import Text
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, help="Test only one seed value")

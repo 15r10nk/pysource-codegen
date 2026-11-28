@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import ast
 import sys
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent.parent / "pysource-minimize" / "src"))
@@ -57,58 +60,69 @@ for file in sample_dir.glob("*.py"):
     gen_test(file.stem, file)
 
 
-def _find_invalid_ast(seed):
+@dataclass
+class AstIssue:
+    """A generated module that its checker rejects or that fails compilation."""
+
+    tree: ast.Module
+    checker_accepts: bool
+    compiles: bool
+
+
+def probe_invalid_ast(seed: int) -> AstIssue | None:
     tree = generate_ast(seed, depth_limit=9)
-    try:
-        assert is_valid_ast(tree, print)
-    except:
-        print(f"The generated tree is not valid ({seed=}).")
-        print(
-            f"The validity is checked with the generator code which shows a problem in the generation/checking."
-        )
-        return True
-
-    if not does_compile(tree):
-        return tree
-    return None
-
-
-def probe_invalid_ast(seed):
-    tree = _find_invalid_ast(seed)
-    if tree is True:
+    assert isinstance(tree, ast.Module)
+    checker_accepts = is_valid_ast(tree)
+    compiles = does_compile(tree)
+    if checker_accepts and compiles:
         return None
-    return tree
+    return AstIssue(tree, checker_accepts, compiles)
 
 
-def minimize_invalid_ast(seed, tree):
-    last_checked_tree = tree
+def minimize_invalid_ast(seed: int, issue: AstIssue) -> str:
+    """Shrink the module while preserving both observed outcomes."""
+    last_checked_tree = issue.tree
 
-    def checker(tree):
+    def checker(tree: ast.AST) -> bool:
         nonlocal last_checked_tree
 
-        bug_found = not does_compile(tree) and is_valid_ast(tree)
+        if not isinstance(tree, ast.Module):
+            return False
+        # Keep checker rejections distinct from accepted, uncompilable trees.
+        bug_found = (
+            does_compile(tree) == issue.compiles
+            and is_valid_ast(tree) == issue.checker_accepts
+        )
         if bug_found:
             last_checked_tree = tree
 
         return bug_found
 
     try:
-        new_tree = minimize_ast(tree, checker)
+        new_tree = minimize_ast(issue.tree, checker)
+        assert isinstance(new_tree, ast.Module)
     except:
         print(f"error happend while minimize_ast seed={seed}")
         print(ast_dump(last_checked_tree))
         raise
 
-    info = "# pysource-codegen thinks that the this ast is valid python code, but this is not the case:\n"
+    if issue.checker_accepts:
+        info = "# The checker accepts this generated AST, but it does not compile.\n"
+    else:
+        info = "# The generator produced an AST rejected by its checker.\n"
     info += "from ast import *\n"
     info += f"tree = {ast_literal(new_tree)}\n"
     comment = ""
     comment += f"version: {sys.version.split()[0]}\nseed = {seed}\n\n"
+    comment += (
+        f"checker accepts: {issue.checker_accepts}\ncompiles: {issue.compiles}\n\n"
+    )
 
     t = TestBase()
     t.setUp()
 
-    assert not t.does_compile(new_tree)
+    assert t.does_compile(new_tree) == issue.compiles
+    assert is_valid_ast(new_tree) == issue.checker_accepts
 
     comment += "\n".join(t.details)
 
@@ -125,12 +139,10 @@ def minimize_invalid_ast(seed, tree):
 
 
 def generate_invalid_ast(seed):
-    tree = _find_invalid_ast(seed)
-    if tree is True:
-        return True
-    if tree is None:
+    issue = probe_invalid_ast(seed)
+    if issue is None:
         return False
-    return minimize_invalid_ast(seed, tree)
+    return minimize_invalid_ast(seed, issue)
 
 
 if __name__ == "__main__":
