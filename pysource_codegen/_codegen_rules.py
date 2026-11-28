@@ -256,11 +256,15 @@ class StdGenerator(AstGenerator):
             and child_parent_node.parent_attr == "pattern"
             and isinstance(child_parent_node.parent.node, ast.MatchAs)  # type: ignore[union-attr]
         ):
+            # The pattern child receives captures reserved before MatchAs.name.
+            # A bare capture cannot satisfy any of these remaining requirements.
+            if self._remaining_pattern_names(context or Context()):
+                return False
             if self._is_direct_match_or_alternative(child_parent_node.parent):  # type: ignore[arg-type]
                 return not self._match_or_slot_has_later_alternatives(
                     child_parent_node.parent
                 ) and self.none_allowed(child_parent_node)
-            return not self._remaining_pattern_names(context or Context())
+            return True
 
         return super()._should_place_none(
             child_parent_node, quantity, new_node, context

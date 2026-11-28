@@ -2,11 +2,17 @@ import ast
 import sys
 import unittest
 
+from pysource_codegen._codegen import generate_ast
 from pysource_codegen._codegen import is_valid_ast
 
 
 @unittest.skipUnless(sys.version_info >= (3, 10), "requires pattern matching")
 class TestMatchCaptures(unittest.TestCase):
+    def test_match_as_preserves_required_captures_in_or_alternatives(self):
+        tree = generate_ast(21)
+        compile(tree, "<seed-21>", "exec")
+        self.assertTrue(is_valid_ast(tree))
+
     def test_captures_can_be_distributed_across_children(self):
         for pattern in (
             "C(0, value=x)",
