@@ -45,7 +45,6 @@ tests/
 
 find_new_issue.py         # Script to brute-force find seeds that trigger bugs
 run_all.py                # Run tests across multiple Python versions
-ai_coding_agent.py        # pydantic-ai agent that can run tests and edit source files
 ```
 
 ---
