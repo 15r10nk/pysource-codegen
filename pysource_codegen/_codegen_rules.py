@@ -714,7 +714,12 @@ class StdGenerator(AstGenerator):
         p_info: tuple[str, str],
         context: Context,
     ) -> float | None:
-        if p_type != "MatchSequence":
+        if sys.version_info < (3, 10):
+            raise Invalid
+        if not isinstance(par.node, ast.MatchSequence):
+            raise Invalid
+        # Removing another star later could discard its assigned captures.
+        if any(isinstance(pattern, ast.MatchStar) for pattern in par.node.patterns):
             raise Invalid
         if len(self._remaining_pattern_names(context)) > 1:
             raise Invalid
