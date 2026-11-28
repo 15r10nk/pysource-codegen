@@ -8,7 +8,7 @@ The generated code can be compiled but should **not** be executed.
 
 GitHub: https://github.com/15r10nk/pysource-codegen
 License: MIT
-Python support: 3.8 – 3.14 (CPython & PyPy)
+Python support: 3.9 – 3.14 (CPython & PyPy)
 Current version: 0.7.1
 
 ---
@@ -137,14 +137,12 @@ Runs both the legacy `StdGenerator.is_valid_ast` walk and the new `AstChecker.ch
 hatch run test
 
 # Specific Python version
-uvx -p 3.8.2 --with astunparse python -m unittest
+uvx -p 3.9 python -m unittest
 uvx -p 3.15.0a6 python -m unittest
 
 # Type checking (all supported versions)
 hatch run types:check
 ```
-
-> **Note:** Python < 3.9 requires the `astunparse` package (declared as a conditional dependency).
 
 ### Sample-based tests
 
@@ -183,8 +181,6 @@ problems with the unparsing should be fixed in vendor/ast_decompiler (with a tes
 
 - **`AstChecker.rand`** — always raises `AssertionError`.  Any code path that calls `self.rand` in `AstChecker` is a bug.  Use `_should_place_none` or override the relevant `generate_*` method.
 
-- **Python 3.8 / astunparse** — `ast.unparse` does not exist before 3.9.  The `_utils.py` conditional import handles this, but `astunparse` must be available at runtime on 3.8.
-
 ---
 
 ## CI / Tooling
@@ -198,4 +194,4 @@ problems with the unparsing should be fixed in vendor/ast_decompiler (with a tes
 
 ## Agent Rules
 
-- **Always run `uv run run_all.py` before committing.** This runs the test suite across all supported Python versions (3.8 – 3.15) and must be fully green before any commit.
+- **Always run `uv run run_all.py` before committing.** This runs the test suite across all supported Python versions (3.9 – 3.15) and must be fully green before any commit.
